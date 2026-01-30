@@ -1,0 +1,1114 @@
+// =============================================================================
+// Prisma Schema for RecruitMaster CRM
+// =============================================================================
+//
+// This schema defines all database models for tracking candidates through
+// the recruitment pipeline, from initial application to onboarding.
+//
+// Key Models:
+// - Person: Unique individuals identified by email (personal info, GC results)
+// - Application: Job applications linked to a Person (position, stage, docs)
+// - User: Nestack personnel (synced from Firebase)
+// - Assessment: Test scores (general on Person, specialized on Application)
+// - Interview: Interview scheduling and outcomes (linked to Application)
+// - Decision: Final hiring decisions (linked to Application)
+// - AuditLog: Complete activity trail for compliance
+// - EmailLog: Email send history and status
+//
+// Architecture Decision:
+// Person + Application model allows:
+// - Same person applying to multiple roles
+// - One general competencies assessment per person across all applications
+// - Different stages for different role applications
+// - Email-based deduplication prevents duplicate persons
+//
+// Note: Dreamhost MySQL uses utf8mb3 charset (limited emoji support)
+// =============================================================================
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../lib/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// =============================================================================
+// PERSON MODEL
+// =============================================================================
+// Represents a unique individual in the system, identified by email.
+// Stores personal information and general competencies assessment results.
+// A person can have multiple applications for different positions.
+// =============================================================================
+
+model Person {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Primary email address - unique identifier for deduplication
+  email String @unique
+
+  /// Person's first name
+  firstName String
+
+  /// Person's middle name (optional)
+  middleName String?
+
+  /// Person's last name
+  lastName String
+
+  /// Secondary/backup email (optional)
+  secondaryEmail String?
+
+  /// Phone number with country code
+  phoneNumber String?
+
+  /// Country of residence
+  country String?
+
+  /// City of residence
+  city String?
+
+  /// State/province/region
+  state String?
+
+  /// ISO country code (e.g., "US", "MX")
+  countryCode String?
+
+  /// Link to portfolio website
+  portfolioLink String?
+
+  /// Highest education level completed
+  educationLevel String?
+
+  // =========================================================================
+  // General Competencies Assessment (tracked once per person)
+  // =========================================================================
+
+  /// Whether the person has completed the general competencies assessment
+  generalCompetenciesCompleted Boolean @default(false)
+
+  /// Score achieved on general competencies (0-100)
+  generalCompetenciesScore Decimal? @db.Decimal(5, 2)
+
+  /// When general competencies assessment was passed (null if not passed)
+  generalCompetenciesPassedAt DateTime?
+
+  // =========================================================================
+  // Tally Integration
+  // =========================================================================
+
+  /// Tally respondentId - stored for reference but NOT used for deduplication
+  /// Email is the primary deduplication key
+  tallyRespondentId String?
+
+  // =========================================================================
+  // Firebase Integration (for hired candidates)
+  // =========================================================================
+
+  /// Firebase user ID (populated when person is hired and onboarded)
+  firebaseUserId String?
+
+  // =========================================================================
+  // Timestamps
+  // =========================================================================
+
+  /// When the person record was created
+  createdAt DateTime @default(now())
+
+  /// When the person record was last updated
+  updatedAt DateTime @updatedAt
+
+  // =========================================================================
+  // Relations
+  // =========================================================================
+
+  /// All applications submitted by this person
+  applications Application[]
+
+  /// General competencies assessment (one per person)
+  assessments Assessment[]
+
+  /// Audit logs related to this person
+  auditLogs AuditLog[]
+
+  /// Emails sent to this person (not application-specific)
+  emailLogs EmailLog[]
+
+  /// Form submissions by this person
+  formSubmissions FormSubmission[]
+
+  /// Assessment sessions (questionnaire attempts)
+  assessmentSessions AssessmentSession[]
+
+  // =========================================================================
+  // Indexes
+  // =========================================================================
+
+  @@index([email])
+  @@index([tallyRespondentId])
+  @@index([createdAt])
+}
+
+// =============================================================================
+// APPLICATION MODEL
+// =============================================================================
+// Represents a job application for a specific position.
+// A person can have multiple applications (one per position).
+// Each application tracks its own stage, status, and role-specific documents.
+// =============================================================================
+
+model Application {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the person who submitted this application
+  personId String
+
+  /// Position the person applied for
+  position String
+
+  /// Current stage in the recruitment pipeline
+  currentStage Stage @default(APPLICATION)
+
+  /// Current status (active, accepted, rejected, withdrawn)
+  status Status @default(ACTIVE)
+
+  // =========================================================================
+  // Application-specific Documents
+  // =========================================================================
+
+  /// URL to resume file (hosted by Tally)
+  resumeUrl String?
+
+  /// Academic background description
+  academicBackground String? @db.Text
+
+  /// Previous work experience description
+  previousExperience String? @db.Text
+
+  /// Link to video introduction/presentation
+  videoLink String?
+
+  /// URL to additional files (hosted by Tally)
+  otherFileUrl String?
+
+  // =========================================================================
+  // Package Contents Flags
+  // What the applicant indicated they would submit in the form
+  // Used to detect missing files (claimed to submit but file is missing)
+  // =========================================================================
+
+  /// Applicant indicated they have a resume
+  hasResume Boolean @default(false)
+
+  /// Applicant indicated they have academic background info
+  hasAcademicBg Boolean @default(false)
+
+  /// Applicant indicated they have a video introduction
+  hasVideoIntro Boolean @default(false)
+
+  /// Applicant indicated they have previous experience info
+  hasPreviousExp Boolean @default(false)
+
+  /// Applicant indicated they have other files
+  hasOtherFile Boolean @default(false)
+
+  // =========================================================================
+  // Tally Integration
+  // =========================================================================
+
+  /// Tally form submission ID (for idempotency, optional for proprietary forms)
+  tallySubmissionId String? @unique
+
+  /// Tally response ID (for reference)
+  tallyResponseId String?
+
+  /// Tally form ID (to identify which form was used)
+  tallyFormId String?
+
+  // =========================================================================
+  // Proprietary Form Integration
+  // =========================================================================
+
+  /// Reference to form submission (for proprietary forms)
+  formSubmissionId String? @unique
+
+  // =========================================================================
+  // Timestamps
+  // =========================================================================
+
+  /// When the application was submitted
+  createdAt DateTime @default(now())
+
+  /// When the application was last updated
+  updatedAt DateTime @updatedAt
+
+  // =========================================================================
+  // Relations
+  // =========================================================================
+
+  /// The person who submitted this application
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  /// Specialized competencies assessments for this application
+  assessments Assessment[]
+
+  /// Interviews scheduled for this application
+  interviews Interview[]
+
+  /// Hiring decisions for this application
+  decisions Decision[]
+
+  /// Audit logs for this application
+  auditLogs AuditLog[]
+
+  /// Emails sent regarding this application
+  emailLogs EmailLog[]
+
+  /// Form submission (for proprietary forms)
+  formSubmission FormSubmission? @relation(fields: [formSubmissionId], references: [id])
+
+  /// Assessment sessions for specialized competencies
+  assessmentSessions AssessmentSession[]
+
+  // =========================================================================
+  // Indexes
+  // =========================================================================
+
+  @@index([personId])
+  @@index([status])
+  @@index([currentStage])
+  @@index([position])
+  @@index([createdAt])
+}
+
+/// Recruitment pipeline stages
+enum Stage {
+  APPLICATION
+  GENERAL_COMPETENCIES
+  SPECIALIZED_COMPETENCIES
+  INTERVIEW
+  AGREEMENT
+  SIGNED
+}
+
+/// Application status values
+enum Status {
+  ACTIVE
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+// =============================================================================
+// ASSESSMENT MODEL
+// =============================================================================
+// Stores assessment results.
+// - General competencies: Linked to Person (one per person across all apps)
+// - Specialized competencies: Linked to Application (one per application)
+// =============================================================================
+
+model Assessment {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Type of assessment
+  assessmentType AssessmentType
+
+  /// Score achieved (0-100)
+  score Decimal @db.Decimal(5, 2)
+
+  /// Whether the assessment was passed (score >= threshold)
+  passed Boolean
+
+  /// Passing threshold for this assessment
+  threshold Decimal @db.Decimal(5, 2)
+
+  /// When the assessment was completed
+  completedAt DateTime
+
+  /// Raw assessment data/answers (JSON format)
+  rawData Json?
+
+  // =========================================================================
+  // Linkage (one of these must be set based on assessment type)
+  // =========================================================================
+
+  /// Reference to Person (for GENERAL_COMPETENCIES)
+  personId String?
+
+  /// Reference to Application (for SPECIALIZED_COMPETENCIES)
+  applicationId String?
+
+  // =========================================================================
+  // Tally Integration
+  // =========================================================================
+
+  /// Tally submission ID for this assessment (for idempotency)
+  tallySubmissionId String? @unique
+
+  // =========================================================================
+  // Timestamps
+  // =========================================================================
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // =========================================================================
+  // Relations
+  // =========================================================================
+
+  /// The person who took this assessment (general competencies)
+  person Person? @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  /// The application this assessment is for (specialized competencies)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  // =========================================================================
+  // Indexes
+  // =========================================================================
+
+  @@index([personId])
+  @@index([applicationId])
+  @@index([assessmentType])
+}
+
+/// Types of assessments
+enum AssessmentType {
+  GENERAL_COMPETENCIES
+  SPECIALIZED_COMPETENCIES
+}
+
+// =============================================================================
+// INTERVIEW MODEL
+// =============================================================================
+// Tracks interview scheduling and outcomes.
+// Linked to Application (not Person) since interviews are position-specific.
+// Interviewers provide their Cal.com/Calendly links for scheduling.
+// =============================================================================
+
+model Interview {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the application
+  applicationId String
+
+  /// Reference to the interviewer (User)
+  interviewerId String
+
+  /// Interviewer's scheduling link (Cal.com/Calendly)
+  schedulingLink String
+
+  /// When the interview is scheduled for
+  scheduledAt DateTime?
+
+  /// When the interview was completed
+  completedAt DateTime?
+
+  /// Interviewer's notes
+  notes String? @db.Text
+
+  /// Interview outcome
+  outcome InterviewOutcome @default(PENDING)
+
+  /// When the interview invitation email was sent
+  emailSentAt DateTime?
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  interviewer User        @relation(fields: [interviewerId], references: [id])
+
+  @@index([applicationId])
+  @@index([interviewerId])
+  @@index([scheduledAt])
+}
+
+/// Interview outcome values
+enum InterviewOutcome {
+  PENDING
+  ACCEPT
+  REJECT
+}
+
+// =============================================================================
+// USER MODEL
+// =============================================================================
+// Nestack personnel synced from Firebase Auth.
+// Includes administrators and hiring managers.
+// =============================================================================
+
+model User {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Firebase user ID (UID) for SSO integration
+  firebaseUserId String @unique
+
+  /// Nestack email address (primary identifier)
+  email String @unique
+
+  /// Secondary email address
+  secondaryEmail String?
+
+  /// First name
+  firstName String
+
+  /// Middle name
+  middleName String?
+
+  /// Last name
+  lastName String
+
+  /// Display name (shown in UI)
+  displayName String
+
+  /// Job title
+  title String?
+
+  /// City
+  city String?
+
+  /// State/province
+  state String?
+
+  /// ISO country code
+  countryCode String?
+
+  /// Preferred language (ISO code)
+  preferredLanguage String @default("en")
+
+  /// Timezone (IANA format)
+  timezone String @default("America/New_York")
+
+  /// Organization name
+  organisation String @default("Nestack Technologies")
+
+  /// Operational clearance level
+  operationalClearance Clearance @default(A)
+
+  /// Whether user is admin (in talent-administration group)
+  isAdmin Boolean @default(false)
+
+  /// Whether user has app access (in talent-access OR talent-administration group)
+  hasAppAccess Boolean @default(false)
+
+  /// Personal scheduling link (Cal.com/Calendly)
+  schedulingLink String?
+
+  /// User status (ACTIVE, SUSPENDED, DISABLED, etc.)
+  userStatus UserStatus @default(ACTIVE)
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  /// When user data was last synced from Firebase
+  lastSyncedAt DateTime?
+
+  // Relations
+  interviews          Interview[]
+  decisions           Decision[]
+  auditLogs           AuditLog[]
+  sentEmails          EmailLog[]
+  applicationForms    ApplicationForm[]
+  gmailCredential     GmailCredential?
+  assessmentTemplates AssessmentTemplate[]
+
+  @@index([firebaseUserId])
+  @@index([email])
+}
+
+// =============================================================================
+// GMAIL CREDENTIAL MODEL
+// =============================================================================
+// Stores OAuth2 credentials for Gmail integration.
+// Each user can connect one Gmail account to send emails.
+// Tokens are stored encrypted and auto-refreshed when expired.
+// =============================================================================
+
+model GmailCredential {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the user who owns this credential
+  userId String @unique
+
+  /// Gmail email address
+  email String
+
+  /// OAuth2 access token (encrypted)
+  accessToken String @db.Text
+
+  /// OAuth2 refresh token (encrypted)
+  refreshToken String @db.Text
+
+  /// When the access token expires
+  tokenExpiry DateTime
+
+  /// OAuth scopes granted (comma-separated)
+  scopes String
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+}
+
+/// Operational clearance levels
+enum Clearance {
+  A
+  B
+  C
+}
+
+/// User status values
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  SUSPENDED
+}
+
+// =============================================================================
+// DECISION MODEL
+// =============================================================================
+// Records final hiring decisions for applications.
+// Reason is required for rejections (GDPR compliance).
+// =============================================================================
+
+model Decision {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the application
+  applicationId String
+
+  /// The decision (accept or reject)
+  decision DecisionType
+
+  /// Reason for the decision (required for rejections)
+  reason String @db.Text
+
+  /// User who made the decision
+  decidedBy String
+
+  /// When the decision was made
+  decidedAt DateTime @default(now())
+
+  /// Additional notes
+  notes String? @db.Text
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [decidedBy], references: [id])
+
+  @@index([applicationId])
+  @@index([decidedBy])
+}
+
+/// Decision types
+enum DecisionType {
+  ACCEPT
+  REJECT
+}
+
+// =============================================================================
+// AUDIT LOG MODEL
+// =============================================================================
+// Comprehensive activity logging for compliance and debugging.
+// Can be linked to Person, Application, or both for context.
+// =============================================================================
+
+model AuditLog {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to related person (optional)
+  personId String?
+
+  /// Reference to related application (optional)
+  applicationId String?
+
+  /// Reference to user who performed action (optional)
+  userId String?
+
+  /// Human-readable action description
+  action String @db.VarChar(100)
+
+  /// Type of action for filtering
+  actionType ActionType
+
+  /// Additional details (JSON format)
+  details Json?
+
+  /// IP address of the request
+  ipAddress String?
+
+  /// User agent string
+  userAgent String? @db.Text
+
+  /// When the action occurred
+  createdAt DateTime @default(now())
+
+  // Relations
+  person      Person?      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([personId])
+  @@index([applicationId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([actionType])
+}
+
+/// Types of logged actions
+enum ActionType {
+  CREATE
+  UPDATE
+  DELETE
+  VIEW
+  EMAIL_SENT
+  STATUS_CHANGE
+  STAGE_CHANGE
+}
+
+// =============================================================================
+// EMAIL LOG MODEL
+// =============================================================================
+// Tracks all emails sent through the system.
+// Can be linked to Person, Application, or both depending on email type.
+// =============================================================================
+
+model EmailLog {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the person (optional - for person-level emails)
+  personId String?
+
+  /// Reference to the application (optional - for application-specific emails)
+  applicationId String?
+
+  /// Email address the email was sent to
+  recipientEmail String
+
+  /// Name of the email template used
+  templateName String
+
+  /// Email subject line
+  subject String
+
+  /// When the email was actually sent
+  sentAt DateTime?
+
+  /// Current status of the email
+  status EmailStatus @default(PENDING)
+
+  /// Error message if send failed
+  errorMessage String? @db.Text
+
+  /// User who triggered the email (optional for automated emails)
+  sentBy String?
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  person      Person?      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [sentBy], references: [id], onDelete: SetNull)
+
+  @@index([personId])
+  @@index([applicationId])
+  @@index([status])
+  @@index([sentAt])
+}
+
+/// Email delivery status
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+  BOUNCED
+}
+
+// =============================================================================
+// APPLICATION FORM MODEL
+// =============================================================================
+// Proprietary application forms created by admins.
+// Each form can be a template or a specific position's application form.
+// Forms have a unique slug for public URLs (/forms/[slug]).
+// =============================================================================
+
+model ApplicationForm {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Human-readable form name (e.g., "Software Developer Application")
+  name String
+
+  /// URL-friendly identifier for public form URL (/forms/[slug])
+  slug String @unique
+
+  /// Form description (shown to applicants)
+  description String? @db.Text
+
+  /// Position this form is for (pre-filled in applications)
+  position String
+
+  /// Whether the form is accepting submissions
+  isActive Boolean @default(true)
+
+  /// Whether this is a reusable template
+  isTemplate Boolean @default(false)
+
+  /// If created from a template, reference to the template
+  templateId String?
+
+  /// Form field configuration (JSON array of FormField objects)
+  fields Json
+
+  /// Custom header text displayed at top of form
+  headerText String? @db.Text
+
+  /// Custom footer text displayed at bottom of form
+  footerText String? @db.Text
+
+  /// User who created this form
+  createdBy String
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  creator     User             @relation(fields: [createdBy], references: [id])
+  submissions FormSubmission[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@index([position])
+  @@index([isTemplate])
+}
+
+// =============================================================================
+// FORM SUBMISSION MODEL
+// =============================================================================
+// Records of submissions to proprietary application forms.
+// Links to Person and Application after processing.
+// =============================================================================
+
+model FormSubmission {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the form
+  formId String
+
+  /// Reference to the person (linked after processing)
+  personId String?
+
+  /// Raw submission data (all form field values as JSON)
+  data Json
+
+  /// File URLs and metadata (JSON)
+  files Json?
+
+  /// Processing status
+  status SubmissionStatus @default(PENDING)
+
+  /// When the submission was processed
+  processedAt DateTime?
+
+  /// Error message if processing failed
+  errorMessage String? @db.Text
+
+  /// IP address of submitter
+  ipAddress String?
+
+  /// User agent of submitter
+  userAgent String? @db.Text
+
+  /// When the form was submitted
+  submittedAt DateTime @default(now())
+
+  // Relations
+  form        ApplicationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  person      Person?         @relation(fields: [personId], references: [id], onDelete: SetNull)
+  application Application?
+
+  @@index([formId])
+  @@index([status])
+  @@index([submittedAt])
+  @@index([personId])
+}
+
+/// Form submission processing status
+enum SubmissionStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+// =============================================================================
+// ASSESSMENT BUILDER MODELS
+// =============================================================================
+// These models support the internal assessment/questionnaire builder system.
+// Replaces Tally-based assessments with proprietary questionnaires.
+// =============================================================================
+
+/// Assessment template types
+enum AssessmentTemplateType {
+  GENERAL_COMPETENCIES
+  SPECIALIZED_COMPETENCIES
+}
+
+/// Question types for assessments
+enum QuestionType {
+  MULTIPLE_CHOICE      // Single select with scoring
+  MULTIPLE_SELECT      // Multi-select with scoring
+  LIKERT_SCALE         // 1-5 scale
+  TRUE_FALSE           // Boolean
+  TEXT                 // Free text (manual scoring)
+  RATING               // 1-10 rating
+}
+
+/// Assessment session status
+enum SessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  EXPIRED
+  ABANDONED
+}
+
+// =============================================================================
+// ASSESSMENT TEMPLATE MODEL
+// =============================================================================
+// Questionnaire definition created by admins.
+// Can be for General Competencies (applies to all) or Specialized (per role).
+// =============================================================================
+
+model AssessmentTemplate {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Human-readable name (e.g., "GC Assessment v2", "Software Dev SC")
+  name String
+
+  /// URL-friendly identifier for public assessment URL (/assess/[slug])
+  slug String @unique
+
+  /// Description shown to candidates
+  description String? @db.Text
+
+  /// Type of assessment (GC or SC)
+  type AssessmentTemplateType
+
+  /// Position this template is for (NULL for GC, set for SC)
+  position String?
+
+  /// Whether this template is accepting submissions
+  isActive Boolean @default(true)
+
+  /// Minimum score to pass (0-100)
+  passingScore Int
+
+  /// Maximum possible score
+  maxScore Int
+
+  /// Time limit in minutes (optional)
+  timeLimit Int?
+
+  /// Custom header text displayed at top of assessment
+  headerText String? @db.Text
+
+  /// Custom footer text displayed at bottom of assessment
+  footerText String? @db.Text
+
+  /// User who created this template
+  createdBy String
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  creator   User                 @relation(fields: [createdBy], references: [id])
+  questions AssessmentQuestion[]
+  sessions  AssessmentSession[]
+
+  @@index([type])
+  @@index([position])
+  @@index([isActive])
+}
+
+// =============================================================================
+// ASSESSMENT QUESTION MODEL
+// =============================================================================
+// Individual question in an assessment template.
+// Supports multiple question types with configurable scoring.
+// =============================================================================
+
+model AssessmentQuestion {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the template
+  templateId String
+
+  /// Question order/position
+  order Int
+
+  /// Type of question
+  type QuestionType
+
+  /// Question text
+  text String @db.Text
+
+  /// Help text shown below question (optional)
+  helpText String? @db.Text
+
+  /// Whether an answer is required
+  required Boolean @default(true)
+
+  /// Maximum points for this question
+  points Int
+
+  /// Options for choice questions: [{id, text, points, isCorrect?}]
+  options Json?
+
+  /// Optional section grouping name
+  section String?
+
+  /// Record creation timestamp
+  createdAt DateTime @default(now())
+
+  /// Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  template  AssessmentTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  responses AssessmentResponse[]
+
+  @@index([templateId])
+}
+
+// =============================================================================
+// ASSESSMENT SESSION MODEL
+// =============================================================================
+// A candidate's assessment attempt/session.
+// Tracks progress, timing, and final results.
+// =============================================================================
+
+model AssessmentSession {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the assessment template
+  templateId String
+
+  /// Reference to the person taking the assessment
+  personId String
+
+  /// Reference to the application (for SC assessments)
+  applicationId String?
+
+  /// Session status
+  status SessionStatus @default(IN_PROGRESS)
+
+  /// When the session started
+  startedAt DateTime @default(now())
+
+  /// When the session was completed
+  completedAt DateTime?
+
+  /// Total score achieved
+  score Int?
+
+  /// Whether the assessment was passed
+  passed Boolean?
+
+  /// IP address of the candidate
+  ipAddress String?
+
+  /// User agent of the candidate
+  userAgent String? @db.Text
+
+  // Relations
+  template    AssessmentTemplate   @relation(fields: [templateId], references: [id])
+  person      Person               @relation(fields: [personId], references: [id])
+  application Application?         @relation(fields: [applicationId], references: [id])
+  responses   AssessmentResponse[]
+
+  @@unique([templateId, personId, applicationId])
+  @@index([personId])
+  @@index([applicationId])
+}
+
+// =============================================================================
+// ASSESSMENT RESPONSE MODEL
+// =============================================================================
+// Individual question response within a session.
+// Stores answer data and calculated score.
+// =============================================================================
+
+model AssessmentResponse {
+  /// Unique identifier (UUID)
+  id String @id @default(uuid())
+
+  /// Reference to the session
+  sessionId String
+
+  /// Reference to the question
+  questionId String
+
+  /// Answer data (text, selected option IDs, rating value, etc.)
+  answer Json
+
+  /// Points awarded for this response
+  score Int?
+
+  /// When the answer was submitted
+  answeredAt DateTime @default(now())
+
+  // Relations
+  session  AssessmentSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question AssessmentQuestion @relation(fields: [questionId], references: [id])
+
+  @@unique([sessionId, questionId])
+  @@index([sessionId])
+}

@@ -1,0 +1,50 @@
+/**
+ * Root Layout
+ *
+ * This is the root layout component that wraps all pages in the application.
+ * It sets up:
+ * - Global fonts (Geist Sans and Geist Mono)
+ * - Global CSS styles
+ * - HTML metadata (title, description)
+ * - Theme provider for dark mode support
+ */
+
+import type { Metadata } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
+import './globals.css';
+import { branding } from '@/config';
+import { ThemeProvider } from '@/components/theme-provider';
+
+// Load Geist fonts from Google Fonts
+const geistSans = Geist({
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
+});
+
+const geistMono = Geist_Mono({
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
+});
+
+// Page metadata using branding config
+export const metadata: Metadata = {
+  title: {
+    default: `${branding.organisationShortName} ${branding.appName}`,
+    template: `%s | ${branding.appName}`,
+  },
+  description: branding.appDescription,
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  );
+}

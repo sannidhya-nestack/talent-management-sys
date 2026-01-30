@@ -1,0 +1,469 @@
+'use server';
+
+/**
+ * User Management Server Actions
+ *
+ * Server actions for managing users from the admin dashboard.
+ */
+
+import { revalidatePath } from 'next/cache';
+import { auth } from '@/lib/auth';
+import { isValidUUID } from '@/lib/utils';
+import {
+  getUsers,
+  getUserById,
+  updateUser,
+  deleteUser,
+  getUserStats,
+  syncUsersFromFirebase,
+} from '@/lib/services/users';
+import { cleanupSeedData } from '@/lib/services/seed-cleanup';
+import {
+  isFirebaseConfigured,
+  getAllFirebaseUsersWithAdminStatus,
+  grantTalentAppAccess,
+  grantAdminAccess,
+  revokeAdminAccess,
+  revokeAllAppAccess,
+  checkUserAppAccess,
+} from '@/lib/integrations/firebase';
+import type { UserListItem, UserStats, UpdateUserData } from '@/types/user';
+import type { UserStatus } from '@/lib/generated/prisma/client';
+
+/**
+ * Result type for server actions
+ */
+interface ActionResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+/**
+ * Fetch all users for the admin dashboard
+ */
+export async function fetchUsers(options?: {
+  search?: string;
+  isAdmin?: boolean;
+  userStatus?: UserStatus | 'ALL' | 'DISABLED' | 'INACTIVE';
+}): Promise<ActionResult<{ users: UserListItem[]; stats: UserStats }>> {
+  try {
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const [users, stats] = await Promise.all([
+      getUsers(options),
+      getUserStats(),
+    ]);
+
+    return { success: true, data: { users, stats } };
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    return { success: false, error: 'Failed to fetch users' };
+  }
+}
+
+/**
+ * Fetch a single user by ID
+ */
+export async function fetchUser(id: string): Promise<ActionResult<{ user: Awaited<ReturnType<typeof getUserById>> }>> {
+  try {
+    // Validate UUID format to prevent invalid database queries
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid user ID format' };
+    }
+
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const user = await getUserById(id);
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    return { success: true, data: { user } };
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    return { success: false, error: 'Failed to fetch user' };
+  }
+}
+
+/**
+ * Update a user
+ */
+export async function updateUserAction(
+  id: string,
+  data: UpdateUserData
+): Promise<ActionResult<{ user: Awaited<ReturnType<typeof updateUser>> }>> {
+  try {
+    // Validate UUID format to prevent invalid database queries
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid user ID format' };
+    }
+
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const user = await updateUser(id, data);
+    revalidatePath('/users');
+    return { success: true, data: { user } };
+  } catch (error) {
+    console.error('Error updating user:', error);
+    return { success: false, error: 'Failed to update user' };
+  }
+}
+
+/**
+ * Delete a user
+ */
+export async function deleteUserAction(id: string): Promise<ActionResult<void>> {
+  try {
+    // Validate UUID format to prevent invalid database queries
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid user ID format' };
+    }
+
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    // Cannot delete self
+    if (session.user.dbUserId === id) {
+      return { success: false, error: 'Cannot delete your own account' };
+    }
+
+    await deleteUser(id);
+    revalidatePath('/users');
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    return { success: false, error: 'Failed to delete user' };
+  }
+}
+
+/**
+ * Sync users from Firebase
+ *
+ * Syncs ALL users from Firebase Auth to the local database.
+ * Updates their role information based on custom claims.
+ * Removes users from the database that no longer exist in Firebase.
+ * Also cleans up seed/sample data to prepare the app for production.
+ */
+export async function syncFromFirebaseAction(): Promise<ActionResult<{ synced: number; removed: number; seedDataCleaned: boolean }>> {
+  try {
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    if (!isFirebaseConfigured()) {
+      return { success: false, error: 'Firebase integration is not configured' };
+    }
+
+    // Get ALL users from Firebase with their role information
+    const firebaseUsers = await getAllFirebaseUsersWithAdminStatus();
+    
+    console.log(`[Sync] Fetched ${firebaseUsers.length} users from Firebase`);
+    
+    const { synced, removed } = await syncUsersFromFirebase(firebaseUsers, session.user.dbUserId);
+
+    console.log(`[Sync] Completed: ${synced} users synced, ${removed} users removed`);
+
+    // Clean up seed data after successful sync to make app production-ready
+    const seedCleanupResult = await cleanupSeedData(session.user.dbUserId);
+    const seedDataCleaned = 
+      seedCleanupResult.usersRemoved > 0 ||
+      seedCleanupResult.personsRemoved > 0 ||
+      seedCleanupResult.applicationsRemoved > 0;
+
+    if (seedDataCleaned) {
+      console.log(`[Sync] Seed data cleaned: ${seedCleanupResult.usersRemoved} users, ${seedCleanupResult.personsRemoved} persons, ${seedCleanupResult.applicationsRemoved} applications removed`);
+    }
+
+    revalidatePath('/users');
+    revalidatePath('/candidates');
+    revalidatePath('/dashboard');
+    return { success: true, data: { synced, removed, seedDataCleaned } };
+  } catch (error) {
+    console.error('Error syncing from Firebase:', error);
+    // Provide more detailed error message
+    const errorMessage = error instanceof Error ? error.message : 'Failed to sync from Firebase';
+    return { success: false, error: errorMessage };
+  }
+}
+
+/**
+ * Make a user an administrator
+ * Sets the `isAdmin` custom claim in Firebase and updates local database
+ */
+export async function makeAdminAction(id: string): Promise<ActionResult<{ user: UserListItem }>> {
+  try {
+    // Validate UUID format to prevent invalid database queries
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid user ID format' };
+    }
+
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    if (!isFirebaseConfigured()) {
+      return { success: false, error: 'Firebase integration is not configured' };
+    }
+
+    // Cannot change own admin status
+    if (session.user.dbUserId === id) {
+      return { success: false, error: 'Cannot change your own admin status' };
+    }
+
+    const currentUser = await getUserById(id);
+    if (!currentUser) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (currentUser.isAdmin) {
+      return { success: false, error: 'User is already an administrator' };
+    }
+
+    // Set admin custom claim in Firebase
+    await grantAdminAccess(currentUser.firebaseUserId);
+
+    // Update local database - admin always has app access
+    const updatedUser = await updateUser(id, { isAdmin: true, hasAppAccess: true });
+    
+    revalidatePath('/users');
+    
+    // Return updated user for UI update
+    return { 
+      success: true, 
+      data: { 
+        user: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          firstName: updatedUser.firstName,
+          lastName: updatedUser.lastName,
+          displayName: updatedUser.displayName,
+          title: updatedUser.title,
+          isAdmin: updatedUser.isAdmin,
+          hasAppAccess: updatedUser.hasAppAccess,
+          schedulingLink: updatedUser.schedulingLink,
+          userStatus: updatedUser.userStatus,
+          lastSyncedAt: updatedUser.lastSyncedAt,
+          createdAt: updatedUser.createdAt,
+        }
+      } 
+    };
+  } catch (error) {
+    console.error('Error making user admin:', error);
+    return { success: false, error: 'Failed to make user admin' };
+  }
+}
+
+/**
+ * Revoke admin access from a user
+ * Removes the `isAdmin` custom claim but keeps `hasAppAccess` if it was set
+ */
+export async function revokeAdminAction(id: string): Promise<ActionResult<{ user: UserListItem }>> {
+  try {
+    // Validate UUID format to prevent invalid database queries
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid user ID format' };
+    }
+
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    if (!isFirebaseConfigured()) {
+      return { success: false, error: 'Firebase integration is not configured' };
+    }
+
+    // Cannot change own admin status
+    if (session.user.dbUserId === id) {
+      return { success: false, error: 'Cannot change your own admin status' };
+    }
+
+    const currentUser = await getUserById(id);
+    if (!currentUser) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (!currentUser.isAdmin) {
+      return { success: false, error: 'User is not an administrator' };
+    }
+
+    // Remove admin custom claim in Firebase
+    await revokeAdminAccess(currentUser.firebaseUserId);
+
+    // Check if they have app access, if not grant it to keep them as hiring manager
+    const accessCheck = await checkUserAppAccess(currentUser.firebaseUserId);
+    if (!accessCheck.hasAccess) {
+      await grantTalentAppAccess(currentUser.firebaseUserId);
+    }
+
+    // Update local database - no longer admin but still has app access as hiring manager
+    const updatedUser = await updateUser(id, { isAdmin: false, hasAppAccess: true });
+    
+    revalidatePath('/users');
+    
+    return { 
+      success: true, 
+      data: { 
+        user: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          firstName: updatedUser.firstName,
+          lastName: updatedUser.lastName,
+          displayName: updatedUser.displayName,
+          title: updatedUser.title,
+          isAdmin: updatedUser.isAdmin,
+          hasAppAccess: updatedUser.hasAppAccess,
+          schedulingLink: updatedUser.schedulingLink,
+          userStatus: updatedUser.userStatus,
+          lastSyncedAt: updatedUser.lastSyncedAt,
+          createdAt: updatedUser.createdAt,
+        }
+      } 
+    };
+  } catch (error) {
+    console.error('Error revoking admin access:', error);
+    return { success: false, error: 'Failed to revoke admin access' };
+  }
+}
+
+/**
+ * Grant app access to a user by setting the `hasAppAccess` custom claim
+ */
+export async function grantAppAccessAction(id: string): Promise<ActionResult<{ user: UserListItem }>> {
+  try {
+    // Validate UUID format to prevent invalid database queries
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid user ID format' };
+    }
+
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    if (!isFirebaseConfigured()) {
+      return { success: false, error: 'Firebase integration is not configured' };
+    }
+
+    const user = await getUserById(id);
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (user.hasAppAccess) {
+      return { success: false, error: 'User already has app access' };
+    }
+
+    // Set app access custom claim in Firebase
+    await grantTalentAppAccess(user.firebaseUserId);
+
+    // Update local database to reflect the change
+    const updatedUser = await updateUser(id, { hasAppAccess: true });
+
+    revalidatePath('/users');
+    
+    return { 
+      success: true, 
+      data: { 
+        user: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          firstName: updatedUser.firstName,
+          lastName: updatedUser.lastName,
+          displayName: updatedUser.displayName,
+          title: updatedUser.title,
+          isAdmin: updatedUser.isAdmin,
+          hasAppAccess: updatedUser.hasAppAccess,
+          schedulingLink: updatedUser.schedulingLink,
+          userStatus: updatedUser.userStatus,
+          lastSyncedAt: updatedUser.lastSyncedAt,
+          createdAt: updatedUser.createdAt,
+        }
+      } 
+    };
+  } catch (error) {
+    console.error('Error granting app access:', error);
+    return { success: false, error: 'Failed to grant app access' };
+  }
+}
+
+/**
+ * Revoke all app access from a user
+ * Removes both `isAdmin` and `hasAppAccess` custom claims
+ */
+export async function revokeAppAccessAction(id: string): Promise<ActionResult<{ user: UserListItem }>> {
+  try {
+    // Validate UUID format to prevent invalid database queries
+    if (!isValidUUID(id)) {
+      return { success: false, error: 'Invalid user ID format' };
+    }
+
+    const session = await auth();
+    if (!session?.user?.isAdmin) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    if (!isFirebaseConfigured()) {
+      return { success: false, error: 'Firebase integration is not configured' };
+    }
+
+    // Cannot revoke own access
+    if (session.user.dbUserId === id) {
+      return { success: false, error: 'Cannot revoke your own app access' };
+    }
+
+    const user = await getUserById(id);
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (!user.hasAppAccess && !user.isAdmin) {
+      return { success: false, error: 'User does not have app access' };
+    }
+
+    // Remove both custom claims in Firebase
+    await revokeAllAppAccess(user.firebaseUserId);
+
+    // Update local database - no longer admin and no app access
+    const updatedUser = await updateUser(id, { isAdmin: false, hasAppAccess: false });
+
+    revalidatePath('/users');
+    
+    return { 
+      success: true, 
+      data: { 
+        user: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          firstName: updatedUser.firstName,
+          lastName: updatedUser.lastName,
+          displayName: updatedUser.displayName,
+          title: updatedUser.title,
+          isAdmin: updatedUser.isAdmin,
+          hasAppAccess: updatedUser.hasAppAccess,
+          schedulingLink: updatedUser.schedulingLink,
+          userStatus: updatedUser.userStatus,
+          lastSyncedAt: updatedUser.lastSyncedAt,
+          createdAt: updatedUser.createdAt,
+        }
+      } 
+    };
+  } catch (error) {
+    console.error('Error revoking app access:', error);
+    return { success: false, error: 'Failed to revoke app access' };
+  }
+}

@@ -1,0 +1,1150 @@
+'use client';
+
+/**
+ * Application Detail Component
+ *
+ * Displays full application details in a dialog/modal with 70/30 split layout:
+ * - Left (70%): Personal info, documents, academic background, previous experience, activity timeline
+ * - Right (30%): Assessments, interview, decision
+ *
+ * Shows loading skeleton immediately for instant feedback, then populates content.
+ */
+
+import * as React from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { StatusBadge } from './status-badge';
+import { StageBadge } from './stage-badge';
+import { Timeline, TimelineItem, mapActionTypeToTimelineType } from '@/components/ui/timeline';
+import { Stage, Status } from '@/lib/generated/prisma/client';
+import { formatDateShort, formatDateTime, getCountryName } from '@/lib/utils';
+import { recruitment, formatScoreDisplay, strings } from '@/config';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
+  User,
+  Mail,
+  Phone,
+  MapPin,
+  Link as LinkIcon,
+  GraduationCap,
+  FileText,
+  Video,
+  Calendar,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  ExternalLink,
+  Clock,
+  Loader2,
+} from 'lucide-react';
+
+/**
+ * Application detail data structure
+ */
+export interface ApplicationDetailData {
+  id: string;
+  position: string;
+  currentStage: Stage;
+  status: Status;
+  createdAt: string;
+  updatedAt: string;
+  resumeUrl: string | null;
+  academicBackground: string | null;
+  previousExperience: string | null;
+  videoLink: string | null;
+  otherFileUrl: string | null;
+  hasResume: boolean;
+  hasAcademicBg: boolean;
+  hasVideoIntro: boolean;
+  hasPreviousExp: boolean;
+  hasOtherFile: boolean;
+  person: {
+    id: string;
+    firstName: string;
+    middleName: string | null;
+    lastName: string;
+    email: string;
+    secondaryEmail: string | null;
+    phoneNumber: string | null;
+    country: string | null;
+    city: string | null;
+    state: string | null;
+    countryCode: string | null;
+    portfolioLink: string | null;
+    educationLevel: string | null;
+    generalCompetenciesCompleted: boolean;
+    generalCompetenciesScore: string | null;
+    generalCompetenciesPassedAt: string | null;
+  };
+  assessments: Array<{
+    id: string;
+    assessmentType: string;
+    score: string;
+    passed: boolean;
+    threshold: string;
+    completedAt: string;
+  }>;
+  interviews: Array<{
+    id: string;
+    interviewerId: string;
+    schedulingLink: string;
+    scheduledAt: string | null;
+    completedAt: string | null;
+    notes: string | null;
+    outcome: string;
+    interviewer?: {
+      id: string;
+      displayName: string;
+      email: string;
+    };
+  }>;
+  decisions: Array<{
+    id: string;
+    decision: string;
+    reason: string;
+    notes: string | null;
+    decidedAt: string;
+    user?: {
+      id: string;
+      displayName: string;
+    };
+  }>;
+}
+
+interface ApplicationDetailProps {
+  application: ApplicationDetailData | null;
+  auditLogs?: Array<{
+    id: string;
+    action: string;
+    actionType: string;
+    createdAt: string;
+    user?: { displayName: string } | null;
+  }>;
+  isOpen: boolean;
+  onClose: () => void;
+  onSendEmail?: (templateName: string, senderEmail?: string, assessmentTemplateId?: string) => void;
+  onScheduleInterview?: () => void;
+  onMakeDecision?: (decision: 'ACCEPT' | 'REJECT') => void;
+  isAdmin?: boolean;
+  isLoading?: boolean;
+  sendingEmailTemplate?: string | null;
+  isDecisionProcessing?: boolean;
+  /** Available Gmail accounts for sender selection */
+  gmailAccounts?: Array<{ id: string; email: string; userName: string }>;
+  /** Currently selected sender email */
+  selectedSenderEmail?: string | null;
+  /** Callback when sender email is changed */
+  onSenderEmailChange?: (email: string | null) => void;
+}
+
+/**
+ * Loading skeleton for the entire detail view
+ */
+function DetailSkeleton() {
+  return (
+    <div className="flex flex-col lg:flex-row gap-6 h-full">
+      {/* Left Panel Skeleton */}
+      <div className="flex-1 lg:w-[70%] space-y-6">
+        {/* Personal Info Skeleton */}
+        <div className="space-y-4">
+          <Skeleton className="h-5 w-32" />
+          <div className="grid grid-cols-2 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex gap-2">
+                <Skeleton className="h-4 w-4 rounded" />
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-3 w-16" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <Skeleton className="h-px w-full" />
+
+        {/* Documents Skeleton */}
+        <div className="space-y-3">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+
+        <Skeleton className="h-px w-full" />
+
+        {/* Text Areas Skeleton */}
+        <div className="space-y-3">
+          <Skeleton className="h-5 w-36" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      </div>
+
+      {/* Right Panel Skeleton */}
+      <div className="lg:w-[30%] lg:min-w-[280px] space-y-6">
+        {/* Assessment Skeleton */}
+        <div className="border rounded-lg p-4 space-y-3">
+          <div className="flex justify-between">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-5 w-16" />
+          </div>
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+
+        {/* Interview Skeleton */}
+        <div className="border rounded-lg p-4 space-y-3">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+
+        {/* Decision Skeleton */}
+        <div className="border rounded-lg p-4 space-y-3">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-4 w-full" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Missing fields indicator
+ */
+function MissingFieldsAlert({ application }: { application: ApplicationDetailData }) {
+  const missingFields: string[] = [];
+
+  if (application.hasResume && !application.resumeUrl) {
+    missingFields.push('Resume');
+  }
+  if (application.hasAcademicBg && !application.academicBackground) {
+    missingFields.push('Academic Background');
+  }
+  if (application.hasVideoIntro && !application.videoLink) {
+    missingFields.push('Video Introduction');
+  }
+  if (application.hasPreviousExp && !application.previousExperience) {
+    missingFields.push('Previous Experience');
+  }
+  if (application.hasOtherFile && !application.otherFileUrl) {
+    missingFields.push('Other File');
+  }
+
+  if (missingFields.length === 0) return null;
+
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+      <div className="flex items-start gap-2">
+        <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+        <div>
+          <p className="font-medium text-amber-800 text-sm">Missing Documents</p>
+          <p className="text-amber-700 text-sm mt-1">
+            The applicant indicated they would submit: {missingFields.join(', ')}, but these were not received.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Helper components
+ */
+function InfoItem({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <Icon className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="text-sm break-words">{children}</p>
+      </div>
+    </div>
+  );
+}
+
+function DocumentLink({
+  icon: Icon,
+  label,
+  url,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  url: string;
+}) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-2 p-2 rounded-lg border hover:bg-muted/50 transition-colors"
+    >
+      <Icon className="h-4 w-4 text-muted-foreground" />
+      <span className="text-sm flex-1">{label}</span>
+      <ExternalLink className="h-3 w-3 text-muted-foreground" />
+    </a>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h4 className="font-medium text-sm text-muted-foreground mb-3">{children}</h4>
+  );
+}
+
+/**
+ * Left Panel Content - Personal Info, Documents, Background, Activity
+ */
+function LeftPanel({
+  application,
+  auditLogs,
+}: {
+  application: ApplicationDetailData;
+  auditLogs?: ApplicationDetailProps['auditLogs'];
+}) {
+  const { person } = application;
+
+  const timelineItems: TimelineItem[] = (auditLogs || []).map(log => ({
+    id: log.id,
+    title: log.action,
+    timestamp: log.createdAt,
+    type: mapActionTypeToTimelineType(log.actionType),
+    user: log.user ? { name: log.user.displayName } : undefined,
+  }));
+
+  const hasDocuments = application.resumeUrl || application.videoLink || application.otherFileUrl;
+
+  return (
+    <div className="space-y-6">
+      <MissingFieldsAlert application={application} />
+
+      {/* Personal Information */}
+      <div>
+        <SectionTitle>Personal Information</SectionTitle>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <InfoItem icon={User} label="Full Name">
+            {person.firstName} {person.middleName} {person.lastName}
+          </InfoItem>
+          <InfoItem icon={Mail} label="Email">
+            <a href={`mailto:${person.email}`} className="text-primary hover:underline">
+              {person.email}
+            </a>
+          </InfoItem>
+          {person.secondaryEmail && (
+            <InfoItem icon={Mail} label="Secondary Email">
+              <a href={`mailto:${person.secondaryEmail}`} className="text-primary hover:underline">
+                {person.secondaryEmail}
+              </a>
+            </InfoItem>
+          )}
+          {person.phoneNumber && (
+            <InfoItem icon={Phone} label="Phone">
+              {person.phoneNumber}
+            </InfoItem>
+          )}
+          {(person.city || person.state || person.country) && (
+            <InfoItem icon={MapPin} label="Location">
+              {[
+                person.city,
+                person.state,
+                person.country && person.country.length === 2
+                  ? getCountryName(person.country)
+                  : person.country,
+              ].filter(Boolean).join(', ')}
+            </InfoItem>
+          )}
+          {person.portfolioLink && (
+            <InfoItem icon={LinkIcon} label="Portfolio">
+              <a
+                href={person.portfolioLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline flex items-center gap-1"
+              >
+                View Portfolio <ExternalLink className="h-3 w-3" />
+              </a>
+            </InfoItem>
+          )}
+          {person.educationLevel && (
+            <InfoItem icon={GraduationCap} label="Education">
+              {person.educationLevel}
+            </InfoItem>
+          )}
+        </div>
+      </div>
+
+      {/* Documents */}
+      {hasDocuments && (
+        <>
+          <Separator />
+          <div>
+            <SectionTitle>Documents</SectionTitle>
+            <div className="space-y-2">
+              {application.resumeUrl && (
+                <DocumentLink icon={FileText} label="Resume" url={application.resumeUrl} />
+              )}
+              {application.videoLink && (
+                <DocumentLink icon={Video} label="Video Introduction" url={application.videoLink} />
+              )}
+              {application.otherFileUrl && (
+                <DocumentLink icon={FileText} label="Other File" url={application.otherFileUrl} />
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Academic Background */}
+      {application.academicBackground && (
+        <>
+          <Separator />
+          <div>
+            <SectionTitle>Academic Background</SectionTitle>
+            <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded-lg p-3">
+              {application.academicBackground}
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Previous Experience */}
+      {application.previousExperience && (
+        <>
+          <Separator />
+          <div>
+            <SectionTitle>Previous Experience</SectionTitle>
+            <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded-lg p-3">
+              {application.previousExperience}
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Activity Timeline */}
+      <Separator />
+      <div>
+        <SectionTitle>Activity</SectionTitle>
+        {timelineItems.length > 0 ? (
+          <Timeline items={timelineItems} />
+        ) : (
+          <p className="text-sm text-muted-foreground">No activity recorded yet</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Right Panel Content - Assessments, Interview, Decision
+ */
+function RightPanel({
+  application,
+  onSendEmail,
+  onScheduleInterview,
+  onMakeDecision,
+  isAdmin,
+  sendingEmailTemplate,
+  isDecisionProcessing,
+  gmailAccounts,
+  selectedSenderEmail,
+  onSenderEmailChange,
+}: {
+  application: ApplicationDetailData;
+  onSendEmail?: (template: string, senderEmail?: string, assessmentTemplateId?: string) => void;
+  onScheduleInterview?: () => void;
+  onMakeDecision?: (decision: 'ACCEPT' | 'REJECT') => void;
+  isAdmin?: boolean;
+  sendingEmailTemplate?: string | null;
+  isDecisionProcessing?: boolean;
+  gmailAccounts?: Array<{ id: string; email: string; userName: string }>;
+  selectedSenderEmail?: string | null;
+  onSenderEmailChange?: (email: string | null) => void;
+}) {
+  const { person, assessments, interviews, decisions } = application;
+
+  const scAssessment = assessments.find(a => a.assessmentType === 'SPECIALIZED_COMPETENCIES');
+  const latestInterview = interviews[0];
+  const latestDecision = decisions[0];
+
+  // Track if any operation is in progress
+  const isAnyOperationInProgress = sendingEmailTemplate !== null || isDecisionProcessing === true;
+
+  // Assessment template selection state
+  const [gcTemplates, setGcTemplates] = React.useState<Array<{ id: string; name: string; slug: string }>>([]);
+  const [scTemplates, setScTemplates] = React.useState<Array<{ id: string; name: string; slug: string }>>([]);
+  const [selectedGcTemplate, setSelectedGcTemplate] = React.useState<string>('');
+  const [selectedScTemplate, setSelectedScTemplate] = React.useState<string>('');
+  const [loadingTemplates, setLoadingTemplates] = React.useState(false);
+
+  // Helper to truncate template names
+  const truncateTemplateName = (name: string, maxLength: number = 20): string => {
+    if (name.length <= maxLength) return name;
+    return name.substring(0, maxLength) + '...';
+  };
+
+  // Fetch available assessment templates
+  React.useEffect(() => {
+    async function fetchTemplates() {
+      setLoadingTemplates(true);
+      try {
+        // Fetch GC templates
+        const gcResponse = await fetch('/api/assessments/for-email?type=GENERAL_COMPETENCIES');
+        if (gcResponse.ok) {
+          const gcData = await gcResponse.json();
+          setGcTemplates(gcData.templates || []);
+          // Auto-select first template if available
+          if (gcData.templates?.length > 0 && !selectedGcTemplate) {
+            setSelectedGcTemplate(gcData.templates[0].id);
+          }
+        }
+
+        // Fetch SC templates for this position
+        const scResponse = await fetch(`/api/assessments/for-email?type=SPECIALIZED_COMPETENCIES&position=${encodeURIComponent(application.position)}`);
+        if (scResponse.ok) {
+          const scData = await scResponse.json();
+          setScTemplates(scData.templates || []);
+          // Auto-select first template if available
+          if (scData.templates?.length > 0 && !selectedScTemplate) {
+            setSelectedScTemplate(scData.templates[0].id);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching assessment templates:', error);
+      } finally {
+        setLoadingTemplates(false);
+      }
+    }
+
+    if (application) {
+      fetchTemplates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [application?.position]);
+
+  return (
+    <div className="space-y-4">
+      {/* Gmail Sender Selection */}
+      {gmailAccounts && gmailAccounts.length > 0 && onSenderEmailChange && (
+        <div className="border rounded-lg p-3 bg-muted/30">
+          <div className="flex items-center gap-2 mb-2">
+            <Mail className="h-4 w-4 text-muted-foreground" />
+            <span className="text-xs font-medium">Send emails from</span>
+          </div>
+          <Select
+            value={selectedSenderEmail || ''}
+            onValueChange={(value) => onSenderEmailChange(value || null)}
+          >
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Select sender email" />
+            </SelectTrigger>
+            <SelectContent>
+              {gmailAccounts.map((account) => (
+                <SelectItem key={account.id} value={account.email} className="text-xs">
+                  {account.email}
+                  {isAdmin && account.userName && (
+                    <span className="text-muted-foreground ml-1">({account.userName})</span>
+                  )}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {/* General Competencies */}
+      <div className="border rounded-lg p-4">
+        {(() => {
+          const { threshold, scale } = recruitment.assessmentThresholds.generalCompetencies;
+          const score = parseFloat(person.generalCompetenciesScore || '0');
+          const passed = score >= threshold;
+          const scoreDisplay = formatScoreDisplay(person.generalCompetenciesScore, scale);
+          const isActionable = application.status === 'ACTIVE';
+
+          return (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-medium text-sm">General Competencies</h4>
+                {person.generalCompetenciesCompleted ? (
+                  <Badge variant={passed ? 'default' : 'destructive'} className="text-xs">
+                    {passed ? (
+                      <><CheckCircle className="h-3 w-3 mr-1" /> Passed</>
+                    ) : (
+                      <><XCircle className="h-3 w-3 mr-1" /> Failed</>
+                    )}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="text-xs">
+                    <Clock className="h-3 w-3 mr-1" /> Pending
+                  </Badge>
+                )}
+              </div>
+
+              {person.generalCompetenciesCompleted ? (
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Score</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="font-medium cursor-help">{scoreDisplay.value}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{scoreDisplay.tooltip}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Threshold</span>
+                    <span>{threshold}</span>
+                  </div>
+                  {person.generalCompetenciesPassedAt && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Completed</span>
+                      <span>{formatDateShort(person.generalCompetenciesPassedAt)}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {isActionable ? (
+                    <>
+                      {gcTemplates.length > 0 && (
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Assessment Template</label>
+                          <Select
+                            value={selectedGcTemplate}
+                            onValueChange={setSelectedGcTemplate}
+                            disabled={loadingTemplates || isAnyOperationInProgress}
+                          >
+                            <SelectTrigger className="h-8 text-xs w-full [&_[data-slot=select-value]]:truncate [&_[data-slot=select-value]]:max-w-[180px]">
+                              <SelectValue placeholder={loadingTemplates ? 'Loading...' : 'Select template'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {gcTemplates.map((template) => (
+                                <SelectItem key={template.id} value={template.id} className="text-xs">
+                                  {template.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      {onSendEmail && (
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="text-xs h-7 w-full" 
+                          onClick={() => onSendEmail(
+                            'general-competencies-invitation',
+                            selectedSenderEmail || undefined,
+                            selectedGcTemplate || undefined
+                          )}
+                          disabled={isAnyOperationInProgress || (gcTemplates.length > 0 && !selectedGcTemplate)}
+                        >
+                          {sendingEmailTemplate === 'general-competencies-invitation' ? (
+                            <>
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              Sending...
+                            </>
+                          ) : (
+                            <>
+                              <Mail className="h-3 w-3 mr-1" />
+                              {gcTemplates.length > 0 ? 'Send Assessment Link' : 'Send Link (Tally)'}
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic text-center py-2">
+                      {strings.statuses.applicationRejected}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Specialized Competencies */}
+      <div className="border rounded-lg p-4">
+        {(() => {
+          const gcConfig = recruitment.assessmentThresholds.generalCompetencies;
+          const scConfig = recruitment.assessmentThresholds.specializedCompetencies;
+          const gcScore = parseFloat(person.generalCompetenciesScore || '0');
+          const gcPassed = gcScore >= gcConfig.threshold;
+          const isActionable = application.status === 'ACTIVE';
+
+          return (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-medium text-sm">Specialized Competencies</h4>
+                {scAssessment ? (
+                  <Badge variant={scAssessment.passed ? 'default' : 'destructive'} className="text-xs">
+                    {scAssessment.passed ? (
+                      <><CheckCircle className="h-3 w-3 mr-1" /> Passed</>
+                    ) : (
+                      <><XCircle className="h-3 w-3 mr-1" /> Failed</>
+                    )}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="text-xs">
+                    <Clock className="h-3 w-3 mr-1" /> Pending
+                  </Badge>
+                )}
+              </div>
+
+              {scAssessment ? (
+                (() => {
+                  const scoreDisplay = formatScoreDisplay(scAssessment.score, scConfig.scale);
+                  return (
+                    <div className="space-y-1.5 text-sm">
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Score</span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="font-medium cursor-help">{scoreDisplay.value}</span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{scoreDisplay.tooltip}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Threshold</span>
+                        <span>{scConfig.threshold}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Completed</span>
+                        <span>{formatDateShort(scAssessment.completedAt)}</span>
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="text-center py-2">
+                  {isActionable ? (
+                    <>
+                      {!person.generalCompetenciesCompleted ? (
+                        <p className="text-xs text-muted-foreground opacity-60">
+                          {strings.interview.gcNotCompleted}
+                        </p>
+                      ) : !gcPassed ? (
+                        <p className="text-xs text-muted-foreground opacity-60">
+                          {strings.interview.gcFailed}
+                        </p>
+                      ) : (
+                        <>
+                          <div className="space-y-2">
+                            {scTemplates.length > 0 && (
+                              <div className="space-y-1">
+                                <label className="text-xs text-muted-foreground">Assessment Template</label>
+                                <Select
+                                  value={selectedScTemplate}
+                                  onValueChange={setSelectedScTemplate}
+                                  disabled={loadingTemplates || isAnyOperationInProgress}
+                                >
+                                  <SelectTrigger className="h-8 text-xs w-full [&_[data-slot=select-value]]:truncate [&_[data-slot=select-value]]:max-w-[180px]">
+                                    <SelectValue placeholder={loadingTemplates ? 'Loading...' : 'Select template'} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {scTemplates.map((template) => (
+                                      <SelectItem key={template.id} value={template.id} className="text-xs">
+                                        {template.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            {onSendEmail && (
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                className="text-xs h-7 w-full" 
+                                onClick={() => onSendEmail(
+                                  'specialized-competencies-invitation',
+                                  selectedSenderEmail || undefined,
+                                  selectedScTemplate || undefined
+                                )}
+                                disabled={isAnyOperationInProgress || (scTemplates.length > 0 && !selectedScTemplate)}
+                              >
+                                {sendingEmailTemplate === 'specialized-competencies-invitation' ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    Sending...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Mail className="h-3 w-3 mr-1" />
+                                    {scTemplates.length > 0 ? 'Send Assessment Link' : 'Send Link (Tally)'}
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">
+                      {strings.statuses.applicationRejected}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Interview */}
+      <div className="border rounded-lg p-4">
+        {(() => {
+          const gcConfig = recruitment.assessmentThresholds.generalCompetencies;
+          const gcScore = parseFloat(person.generalCompetenciesScore || '0');
+          const gcPassed = gcScore >= gcConfig.threshold;
+          const isActionable = application.status === 'ACTIVE';
+          const canScheduleInterview = person.generalCompetenciesCompleted && gcPassed;
+
+          return (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-medium text-sm">Interview</h4>
+                {latestInterview ? (
+                  <Badge variant={
+                    latestInterview.outcome === 'ACCEPT' ? 'default' :
+                    latestInterview.outcome === 'REJECT' ? 'destructive' :
+                    'secondary'
+                  } className="text-xs">
+                    {latestInterview.outcome === 'ACCEPT' ? 'Accepted' :
+                     latestInterview.outcome === 'REJECT' ? 'Rejected' :
+                     'Pending'}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="text-xs">
+                    <Clock className="h-3 w-3 mr-1" /> Not Scheduled
+                  </Badge>
+                )}
+              </div>
+
+              {latestInterview ? (
+                <div className="space-y-2">
+                  {latestInterview.interviewer && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Interviewer</span>
+                      <span className="text-right">{latestInterview.interviewer.displayName}</span>
+                    </div>
+                  )}
+                  {latestInterview.scheduledAt && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Scheduled</span>
+                      <span className="text-right">{formatDateTime(latestInterview.scheduledAt)}</span>
+                    </div>
+                  )}
+                  {latestInterview.completedAt && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Completed</span>
+                      <span className="text-right">{formatDateTime(latestInterview.completedAt)}</span>
+                    </div>
+                  )}
+                  {latestInterview.notes && (
+                    <div className="mt-2 pt-2 border-t">
+                      <p className="text-xs text-muted-foreground mb-1">Notes</p>
+                      <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded p-2">
+                        {latestInterview.notes}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-2">
+                  {isActionable ? (
+                    <>
+                      {!person.generalCompetenciesCompleted ? (
+                        <p className="text-xs text-muted-foreground opacity-60">
+                          {strings.interview.gcNotCompleted}
+                        </p>
+                      ) : !gcPassed ? (
+                        <p className="text-xs text-muted-foreground opacity-60">
+                          {strings.interview.gcFailed}
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            {strings.interview.noInterviewScheduled}
+                          </p>
+                          {onScheduleInterview && (
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="text-xs h-7" 
+                              onClick={onScheduleInterview}
+                              disabled={isAnyOperationInProgress}
+                            >
+                              <Calendar className="h-3 w-3 mr-1" />
+                              Schedule
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">
+                      {strings.statuses.applicationRejected}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Decision */}
+      <div className="border rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="font-medium text-sm">Decision</h4>
+          {latestDecision ? (
+            <Badge variant={latestDecision.decision === 'ACCEPT' ? 'default' : 'destructive'} className="text-xs">
+              {latestDecision.decision === 'ACCEPT' ? (
+                <><CheckCircle className="h-3 w-3 mr-1" /> Accepted</>
+              ) : (
+                <><XCircle className="h-3 w-3 mr-1" /> Rejected</>
+              )}
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="text-xs">
+              <Clock className="h-3 w-3 mr-1" /> Pending
+            </Badge>
+          )}
+        </div>
+
+        {latestDecision ? (
+          <div className="space-y-2">
+            {latestDecision.user && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Decided By</span>
+                <span className="text-right">{latestDecision.user.displayName}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Date</span>
+              <span className="text-right">{formatDateTime(latestDecision.decidedAt)}</span>
+            </div>
+            <div className="mt-2 pt-2 border-t">
+              <p className="text-xs text-muted-foreground mb-1">Reason</p>
+              <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded p-2">
+                {latestDecision.reason}
+              </p>
+            </div>
+            {latestDecision.notes && (
+              <div className="mt-2">
+                <p className="text-xs text-muted-foreground mb-1">Notes</p>
+                <p className="text-sm whitespace-pre-wrap bg-muted/50 rounded p-2">
+                  {latestDecision.notes}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center py-2">
+            {isAdmin && onMakeDecision && application.status === 'ACTIVE' && (() => {
+              const gcConfig = recruitment.assessmentThresholds.generalCompetencies;
+              const gcScore = parseFloat(person.generalCompetenciesScore || '0');
+              const gcPassed = person.generalCompetenciesCompleted && gcScore >= gcConfig.threshold;
+              const gcNotCompleted = !person.generalCompetenciesCompleted;
+              const gcFailed = person.generalCompetenciesCompleted && !gcPassed;
+
+              if (gcNotCompleted) {
+                // GC not completed - show message, no buttons
+                return (
+                  <p className="text-xs text-muted-foreground opacity-60">
+                    {strings.interview.gcNotCompleted}
+                  </p>
+                );
+              }
+
+              if (gcFailed) {
+                // GC failed - only show Reject button
+                return (
+                  <div className="flex flex-col items-center gap-2">
+                    <p className="text-xs text-muted-foreground opacity-60">
+                      {strings.interview.gcFailed}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7 border-red-200 text-red-600 hover:bg-red-50"
+                      onClick={() => onMakeDecision('REJECT')}
+                      disabled={isAnyOperationInProgress}
+                    >
+                      <XCircle className="h-3 w-3 mr-1" />
+                      Reject
+                    </Button>
+                  </div>
+                );
+              }
+
+              // Normal flow - show both buttons
+              return (
+                <>
+                  <p className="text-xs text-muted-foreground mb-2">No decision yet</p>
+                  <div className="flex justify-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7 border-red-200 text-red-600 hover:bg-red-50"
+                      onClick={() => onMakeDecision('REJECT')}
+                      disabled={isAnyOperationInProgress}
+                    >
+                      <XCircle className="h-3 w-3 mr-1" />
+                      Reject
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="text-xs h-7"
+                      onClick={() => onMakeDecision('ACCEPT')}
+                      disabled={isAnyOperationInProgress}
+                    >
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Accept
+                    </Button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Main Application Detail Component
+ */
+export function ApplicationDetail({
+  application,
+  auditLogs,
+  isOpen,
+  onClose,
+  onSendEmail,
+  onScheduleInterview,
+  onMakeDecision,
+  isAdmin = false,
+  isLoading = false,
+  sendingEmailTemplate,
+  isDecisionProcessing,
+  gmailAccounts,
+  selectedSenderEmail,
+  onSenderEmailChange,
+}: ApplicationDetailProps) {
+  // Always render the dialog when open - show skeleton while loading
+  const showSkeleton = isLoading || !application;
+
+  // Get display data (use application data or placeholder for header)
+  const displayName = application
+    ? [application.person.firstName, application.person.middleName, application.person.lastName].filter(Boolean).join(' ')
+    : 'Loading...';
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-[95vw] sm:max-w-6xl h-[90vh] flex flex-col p-0">
+        {/* Header */}
+        <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div>
+              <DialogTitle className="text-2xl font-bold">
+                {showSkeleton ? 'Loading...' : displayName}
+              </DialogTitle>
+              {/* Use div instead of DialogDescription when loading to avoid div-in-p hydration error */}
+              {showSkeleton ? (
+                <div className="flex flex-wrap items-center gap-2 mt-1.5 text-muted-foreground text-sm">
+                  <Skeleton className="h-5 w-20" />
+                  <Skeleton className="h-5 w-20" />
+                  <Skeleton className="h-4 w-32" />
+                </div>
+              ) : (
+                <DialogDescription className="flex flex-wrap items-center gap-2 mt-1.5">
+                  <StageBadge stage={application.currentStage} />
+                  <StatusBadge status={application.status} />
+                  <span className="text-muted-foreground">•</span>
+                  <span>{application.position}</span>
+                  <span className="text-muted-foreground">•</span>
+                  <span>Applied {formatDateShort(application.createdAt)}</span>
+                </DialogDescription>
+              )}
+            </div>
+          </div>
+        </DialogHeader>
+
+        {/* Content - 70/30 Split */}
+        <div className="flex-1 overflow-hidden">
+          {showSkeleton ? (
+            <div className="p-6 h-full">
+              <DetailSkeleton />
+            </div>
+          ) : (
+            <div className="flex flex-col lg:flex-row h-full">
+              {/* Left Panel - 70% */}
+              <ScrollArea className="flex-1 lg:w-[70%]">
+                <div className="p-6">
+                  <LeftPanel application={application} auditLogs={auditLogs} />
+                </div>
+              </ScrollArea>
+
+              {/* Right Panel - 30% */}
+              <div className="lg:w-[30%] lg:min-w-[300px] border-t lg:border-t-0 lg:border-l bg-muted/30">
+                <ScrollArea className="h-full">
+                  <div className="p-6">
+                    <RightPanel
+                      application={application}
+                      onSendEmail={onSendEmail}
+                      onScheduleInterview={onScheduleInterview}
+                      onMakeDecision={onMakeDecision}
+                      isAdmin={isAdmin}
+                      sendingEmailTemplate={sendingEmailTemplate}
+                      isDecisionProcessing={isDecisionProcessing}
+                      gmailAccounts={gmailAccounts}
+                      selectedSenderEmail={selectedSenderEmail}
+                      onSenderEmailChange={onSenderEmailChange}
+                    />
+                  </div>
+                </ScrollArea>
+              </div>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
