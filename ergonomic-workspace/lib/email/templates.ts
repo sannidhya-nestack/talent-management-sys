@@ -7,7 +7,6 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { sanitizeForLog } from '@/lib/security';
 import { branding } from '@/config';
 
 /**
@@ -40,7 +39,7 @@ export function loadTemplate(templateName: string, format: 'html' | 'txt' = 'htm
   const templatePath = join(getTemplatesDir(), `${templateName}.${format}`);
 
   if (!existsSync(templatePath)) {
-    console.warn(`[Email] Template not found: ${sanitizeForLog(templatePath)}`);
+    console.warn(`[Email] Template not found: ${templatePath}`);
     return null;
   }
 
@@ -49,7 +48,7 @@ export function loadTemplate(templateName: string, format: 'html' | 'txt' = 'htm
     templateCache.set(cacheKey, content);
     return content;
   } catch (error) {
-    console.error(`[Email] Failed to load template ${sanitizeForLog(templatePath)}:`, error);
+    console.error(`[Email] Failed to load template ${templatePath}:`, error);
     return null;
   }
 }
@@ -130,4 +129,37 @@ export function renderTemplate(
   const finalSubject = subject || replaceVariables('Message from {{ORGANISATION_SHORT_NAME}}', allVariables);
 
   return { html, text, subject: finalSubject };
+}
+
+/**
+ * Template library for common email types
+ */
+export const emailTemplates = {
+  assessmentScheduling: {
+    name: 'Assessment Scheduling',
+    subject: 'Workspace Assessment Scheduled - {{CLIENT_NAME}}',
+    variables: ['CLIENT_NAME', 'COMPANY_NAME', 'ASSESSMENT_DATE', 'ASSESSMENT_TIME', 'LOCATION', 'ASSESSMENT_TYPE'],
+  },
+  proposalDelivery: {
+    name: 'Proposal Delivery',
+    subject: 'Workspace Proposal - {{CLIENT_NAME}}',
+    variables: ['CLIENT_NAME', 'COMPANY_NAME', 'PROPOSAL_DATE', 'PROJECT_NAME'],
+  },
+  followUpReminder: {
+    name: 'Follow-up Reminder',
+    subject: 'Follow-up: {{SUBJECT}}',
+    variables: ['CLIENT_NAME', 'COMPANY_NAME', 'SUBJECT', 'DUE_DATE'],
+  },
+  paymentReminder: {
+    name: 'Payment Reminder',
+    subject: 'Payment Reminder - Invoice {{INVOICE_NUMBER}}',
+    variables: ['CLIENT_NAME', 'COMPANY_NAME', 'INVOICE_NUMBER', 'AMOUNT', 'DUE_DATE'],
+  },
+} as const;
+
+/**
+ * Get template variables for a specific template type
+ */
+export function getTemplateVariables(templateType: keyof typeof emailTemplates): string[] {
+  return emailTemplates[templateType].variables;
 }

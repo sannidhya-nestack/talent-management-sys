@@ -7,7 +7,6 @@
  * - Auto-refreshing tokens when needed
  */
 
-import { db } from '@/lib/db';
 import {
   exchangeCodeForTokens,
   refreshAccessToken,
@@ -17,6 +16,12 @@ import {
   decryptToken,
 } from './client';
 import { GMAIL_SCOPES, isGmailOAuthConfigured } from './config';
+import {
+  getEmailAccount,
+  upsertEmailAccount,
+  updateEmailAccountTokens,
+  disconnectEmailAccount,
+} from '@/lib/services/integrations/email';
 
 /**
  * Gmail credential with decrypted tokens
@@ -27,7 +32,7 @@ export interface GmailCredentialDecrypted {
   email: string;
   accessToken: string;
   refreshToken: string;
-  tokenExpiry: Date;
+  tokenExpiry: Date | null;
   scopes: string;
 }
 
@@ -55,27 +60,15 @@ export async function saveGmailCredentials(
   const encryptedAccessToken = encryptToken(tokens.accessToken);
   const encryptedRefreshToken = encryptToken(tokens.refreshToken);
 
-  // Upsert the credential (one per user)
-  await db.emailAccount.upsert({
-    where: { userId },
-    create: {
-      userId,
-      email: tokens.email,
-      provider: 'GMAIL',
-      accessToken: encryptedAccessToken,
-      refreshToken: encryptedRefreshToken,
-      expiresAt: tokens.expiryDate,
-      scopes: GMAIL_SCOPES.join(','),
-      isActive: true,
-    },
-    update: {
-      email: tokens.email,
-      accessToken: encryptedAccessToken,
-      refreshToken: encryptedRefreshToken,
-      expiresAt: tokens.expiryDate,
-      scopes: GMAIL_SCOPES.join(','),
-      isActive: true,
-    },
+  // Upsert the credential
+  await upsertEmailAccount({
+    userId,
+    provider: 'GMAIL',
+    email: tokens.email,
+    accessToken: encryptedAccessToken,
+    refreshToken: encryptedRefreshToken,
+    expiresAt: tokens.expiryDate,
+    scopes: GMAIL_SCOPES.join(','),
   });
 
   return { email: tokens.email };
@@ -87,22 +80,20 @@ export async function saveGmailCredentials(
 export async function getUserGmailCredential(
   userId: string
 ): Promise<GmailCredentialDecrypted | null> {
-  const credential = await db.emailAccount.findUnique({
-    where: { userId },
-  });
+  const account = await getEmailAccount(userId, 'GMAIL');
 
-  if (!credential || credential.provider !== 'GMAIL') {
+  if (!account) {
     return null;
   }
 
   return {
-    id: credential.id,
-    userId: credential.userId,
-    email: credential.email,
-    accessToken: decryptToken(credential.accessToken),
-    refreshToken: credential.refreshToken ? decryptToken(credential.refreshToken) : '',
-    tokenExpiry: credential.expiresAt,
-    scopes: credential.scopes,
+    id: account.id,
+    userId: account.userId,
+    email: account.email,
+    accessToken: decryptToken(account.accessToken),
+    refreshToken: account.refreshToken ? decryptToken(account.refreshToken) : '',
+    tokenExpiry: account.expiresAt,
+    scopes: account.scopes,
   };
 }
 
@@ -112,22 +103,33 @@ export async function getUserGmailCredential(
 export async function getGmailCredentialByEmail(
   email: string
 ): Promise<GmailCredentialDecrypted | null> {
-  const credential = await db.emailAccount.findFirst({
-    where: { email, provider: 'GMAIL' },
-  });
+  // Note: This would require a query by email, which needs an index
+  // For now, we'll need to iterate or add an index
+  // This is a simplified version - in production, add an index on email field
+  const { collections } = await import('@/lib/db');
+  const snapshot = await collections
+    .emailAccounts()
+    .where('email', '==', email)
+    .where('provider', '==', 'GMAIL')
+    .where('isActive', '==', true)
+    .limit(1)
+    .get();
 
-  if (!credential) {
+  if (snapshot.empty) {
     return null;
   }
 
+  const doc = snapshot.docs[0];
+  const data = doc.data();
+
   return {
-    id: credential.id,
-    userId: credential.userId,
-    email: credential.email,
-    accessToken: decryptToken(credential.accessToken),
-    refreshToken: credential.refreshToken ? decryptToken(credential.refreshToken) : '',
-    tokenExpiry: credential.expiresAt,
-    scopes: credential.scopes,
+    id: doc.id,
+    userId: data.userId,
+    email: data.email,
+    accessToken: decryptToken(data.accessToken),
+    refreshToken: data.refreshToken ? decryptToken(data.refreshToken) : '',
+    tokenExpiry: data.expiresAt ? new Date(data.expiresAt.toMillis()) : null,
+    scopes: data.scopes,
   };
 }
 
@@ -135,25 +137,32 @@ export async function getGmailCredentialByEmail(
  * Get all connected Gmail accounts (for admin UI)
  */
 export async function getAllGmailAccounts(): Promise<GmailAccountInfo[]> {
-  const credentials = await db.emailAccount.findMany({
-    where: { provider: 'GMAIL' },
-    include: {
-      user: {
-        select: {
-          displayName: true,
-        },
-      },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const { collections } = await import('@/lib/db');
+  const { timestampToDate } = await import('@/lib/db-utils');
+  const { getUserById } = await import('@/lib/services/users');
 
-  return credentials.map((c) => ({
-    id: c.id,
-    email: c.email,
-    userId: c.userId,
-    userName: c.user.displayName,
-    connectedAt: c.createdAt,
-  }));
+  const snapshot = await collections
+    .emailAccounts()
+    .where('provider', '==', 'GMAIL')
+    .where('isActive', '==', true)
+    .get();
+
+  const accounts = await Promise.all(
+    snapshot.docs.map(async (doc) => {
+      const data = doc.data();
+      const user = await getUserById(data.userId);
+
+      return {
+        id: doc.id,
+        email: data.email,
+        userId: data.userId,
+        userName: user?.displayName || 'Unknown',
+        connectedAt: timestampToDate(data.createdAt) || new Date(),
+      };
+    })
+  );
+
+  return accounts;
 }
 
 /**
@@ -166,10 +175,11 @@ export async function disconnectGmail(userId: string): Promise<void> {
     // Revoke the tokens with Google
     await revokeTokens(credential.accessToken);
 
-    // Delete from database
-    await db.emailAccount.delete({
-      where: { userId },
-    });
+    // Get account and disconnect
+    const account = await getEmailAccount(userId, 'GMAIL');
+    if (account) {
+      await disconnectEmailAccount(account.id);
+    }
   }
 }
 
@@ -182,7 +192,7 @@ async function ensureValidToken(
   // Check if token expires within 5 minutes
   const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000);
 
-  if (credential.tokenExpiry > fiveMinutesFromNow) {
+  if (credential.tokenExpiry && credential.tokenExpiry > fiveMinutesFromNow) {
     return credential; // Token still valid
   }
 
@@ -192,13 +202,12 @@ async function ensureValidToken(
 
   // Update in database
   const encryptedAccessToken = encryptToken(refreshed.accessToken);
-  await db.emailAccount.update({
-    where: { id: credential.id },
-    data: {
-      accessToken: encryptedAccessToken,
-      expiresAt: refreshed.expiryDate,
-    },
-  });
+  await updateEmailAccountTokens(
+    credential.id,
+    encryptedAccessToken,
+    credential.refreshToken ? encryptToken(credential.refreshToken) : null,
+    refreshed.expiryDate
+  );
 
   return {
     ...credential,
@@ -276,19 +285,14 @@ export async function sendViaGmail(
  * Check if a user has Gmail connected
  */
 export async function hasGmailConnected(userId: string): Promise<boolean> {
-  const count = await db.emailAccount.count({
-    where: { userId, provider: 'GMAIL' },
-  });
-  return count > 0;
+  const account = await getEmailAccount(userId, 'GMAIL');
+  return account !== null;
 }
 
 /**
  * Get the connected Gmail email for a user
  */
 export async function getConnectedGmailEmail(userId: string): Promise<string | null> {
-  const credential = await db.emailAccount.findUnique({
-    where: { userId },
-    select: { email: true },
-  });
-  return credential?.email || null;
+  const account = await getEmailAccount(userId, 'GMAIL');
+  return account?.email || null;
 }

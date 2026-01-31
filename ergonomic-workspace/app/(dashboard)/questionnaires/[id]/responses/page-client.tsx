@@ -8,7 +8,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, FileText, RefreshCw, AlertCircle } from 'lucide-react';
+import { ArrowLeft, FileText, RefreshCw, AlertCircle, Sparkles, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -53,6 +53,8 @@ export function QuestionnaireResponsesPageClient({ questionnaire }: Questionnair
   const [data, setData] = React.useState<ResponsesData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [analysis, setAnalysis] = React.useState<any>(null);
+  const [isAnalyzing, setIsAnalyzing] = React.useState(false);
 
   const fetchResponses = React.useCallback(async () => {
     try {
@@ -120,10 +122,55 @@ export function QuestionnaireResponsesPageClient({ questionnaire }: Questionnair
                 {data?.total || 0} {data?.total === 1 ? 'response' : 'responses'} total
               </CardDescription>
             </div>
-            <Button onClick={fetchResponses} variant="outline" disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+            <div className="flex gap-2">
+              {data && data.submissions.length > 0 && (
+                <Button
+                  onClick={async () => {
+                    setIsAnalyzing(true);
+                    try {
+                      const response = await fetch(`/api/questionnaires/${questionnaire.id}/analyze`, {
+                        method: 'POST',
+                      });
+                      if (response.ok) {
+                        const result = await response.json();
+                        setAnalysis(result.analysis);
+                        toast({
+                          title: 'Success',
+                          description: 'Analysis completed successfully',
+                        });
+                      } else {
+                        throw new Error('Failed to analyze responses');
+                      }
+                    } catch (error) {
+                      toast({
+                        title: 'Error',
+                        description: error instanceof Error ? error.message : 'Failed to analyze responses',
+                        variant: 'destructive',
+                      });
+                    } finally {
+                      setIsAnalyzing(false);
+                    }
+                  }}
+                  disabled={isAnalyzing}
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Analyze with AI
+                    </>
+                  )}
+                </Button>
+              )}
+              <Button onClick={fetchResponses} variant="outline" disabled={isLoading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -163,6 +210,91 @@ export function QuestionnaireResponsesPageClient({ questionnaire }: Questionnair
           )}
         </CardContent>
       </Card>
+
+      {/* AI Analysis Results */}
+      {analysis && (
+        <Card>
+          <CardHeader>
+            <CardTitle>AI Analysis</CardTitle>
+            <CardDescription>AI-powered insights from questionnaire responses</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {analysis.summary && (
+              <div>
+                <h3 className="font-semibold mb-2">Executive Summary</h3>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{analysis.summary}</p>
+              </div>
+            )}
+
+            {analysis.highRiskAreas && analysis.highRiskAreas.length > 0 && (
+              <div>
+                <h3 className="font-semibold mb-2">High-Risk Areas</h3>
+                <div className="space-y-2">
+                  {analysis.highRiskAreas.map((area: any, index: number) => (
+                    <div key={index} className="border rounded p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium">{area.area}</span>
+                        <span
+                          className={`text-xs px-2 py-1 rounded ${
+                            area.severity === 'HIGH'
+                              ? 'bg-red-100 text-red-800'
+                              : area.severity === 'MEDIUM'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {area.severity}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{area.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {analysis.commonIssues && analysis.commonIssues.length > 0 && (
+              <div>
+                <h3 className="font-semibold mb-2">Common Issues</h3>
+                <ul className="space-y-2">
+                  {analysis.commonIssues.map((issue: any, index: number) => (
+                    <li key={index} className="border rounded p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium">{issue.issue}</span>
+                        <span className="text-xs text-muted-foreground">
+                          Frequency: {issue.frequency}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{issue.description}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysis.focusAreas && analysis.focusAreas.length > 0 && (
+              <div>
+                <h3 className="font-semibold mb-2">Focus Areas for On-Site Assessment</h3>
+                <ul className="space-y-2">
+                  {analysis.focusAreas.map((area: any, index: number) => (
+                    <li key={index} className="border rounded p-3">
+                      <div className="font-medium mb-1">{area.area}</div>
+                      <p className="text-sm text-muted-foreground">{area.reason}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysis.insights && (
+              <div>
+                <h3 className="font-semibold mb-2">Insights & Recommendations</h3>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">{analysis.insights}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

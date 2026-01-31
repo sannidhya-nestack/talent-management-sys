@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Save,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,6 +67,13 @@ export function NewQuestionnairePageClient() {
   // UI state
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [expandedQuestionId, setExpandedQuestionId] = React.useState<string | null>(null);
+  const [isGeneratingAI, setIsGeneratingAI] = React.useState(false);
+  const [aiGenerationInput, setAiGenerationInput] = React.useState({
+    clientName: '',
+    industry: '',
+    companySize: '',
+    focusAreas: '',
+  });
 
   // Auto-generate slug from name
   React.useEffect(() => {
@@ -72,6 +81,96 @@ export function NewQuestionnairePageClient() {
       setSlug(generateSlug(name));
     }
   }, [name, slug]);
+
+  // Generate questions using AI
+  const handleGenerateWithAI = async () => {
+    if (!aiGenerationInput.clientName || !aiGenerationInput.industry) {
+      toast({
+        title: 'Error',
+        description: 'Client name and industry are required for AI generation',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsGeneratingAI(true);
+
+    try {
+      const response = await fetch('/api/ai/questionnaire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientName: aiGenerationInput.clientName,
+          industry: aiGenerationInput.industry,
+          companySize: aiGenerationInput.companySize || undefined,
+          focusAreas: aiGenerationInput.focusAreas
+            ? aiGenerationInput.focusAreas.split(',').map((s) => s.trim())
+            : undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate questionnaire');
+      }
+
+      const data = await response.json();
+
+      if (data.questions && Array.isArray(data.questions)) {
+        // Convert AI-generated questions to QuestionInput format
+        const generatedQuestions: QuestionInput[] = data.questions.map((q: any, index: number) => {
+          const questionId = `q-${Date.now()}-${index}`;
+          let options: any = undefined;
+
+          if (q.type === 'MULTIPLE_CHOICE' || q.type === 'MULTIPLE_SELECT') {
+            options = (q.options || []).map((opt: any, optIndex: number) => ({
+              id: `opt-${questionId}-${optIndex}`,
+              text: typeof opt === 'string' ? opt : opt.text || opt.label || `Option ${optIndex + 1}`,
+            }));
+          } else if (q.type === 'TRUE_FALSE') {
+            options = { trueLabel: 'True', falseLabel: 'False' };
+          } else if (q.type === 'LIKERT_SCALE') {
+            options = { minLabel: 'Strongly Disagree', maxLabel: 'Strongly Agree' };
+          } else if (q.type === 'RATING') {
+            options = { minLabel: 'Poor', maxLabel: 'Excellent', minValue: 1, maxValue: 10 };
+          }
+
+          return {
+            id: questionId,
+            order: index + 1,
+            type: (q.type || 'TEXT') as QuestionType,
+            text: q.text || q.question || '',
+            helpText: q.helpText || undefined,
+            required: q.required !== undefined ? q.required : true,
+            options,
+            section: q.section || undefined,
+          };
+        });
+
+        setQuestions(generatedQuestions);
+        toast({
+          title: 'Success',
+          description: `Generated ${generatedQuestions.length} questions using AI`,
+        });
+      } else if (data.rawResponse) {
+        // If parsing failed, show raw response
+        toast({
+          title: 'Partial Success',
+          description: 'AI generated questions but parsing failed. Check console for raw response.',
+        });
+        console.log('Raw AI response:', data.rawResponse);
+      }
+    } catch (error) {
+      console.error('Error generating questionnaire:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to generate questionnaire',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsGeneratingAI(false);
+    }
+  };
 
   // Add new question
   const addQuestion = (questionType: QuestionType = 'MULTIPLE_CHOICE') => {
@@ -251,6 +350,86 @@ export function NewQuestionnairePageClient() {
           <p className="text-muted-foreground">Build a workspace assessment questionnaire</p>
         </div>
       </div>
+
+      {/* AI Generation */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5" />
+            AI-Powered Generation
+          </CardTitle>
+          <CardDescription>
+            Generate a tailored questionnaire using AI based on client information
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="aiClientName">Client Name *</Label>
+              <Input
+                id="aiClientName"
+                value={aiGenerationInput.clientName}
+                onChange={(e) =>
+                  setAiGenerationInput({ ...aiGenerationInput, clientName: e.target.value })
+                }
+                placeholder="e.g., Acme Corporation"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="aiIndustry">Industry *</Label>
+              <Input
+                id="aiIndustry"
+                value={aiGenerationInput.industry}
+                onChange={(e) =>
+                  setAiGenerationInput({ ...aiGenerationInput, industry: e.target.value })
+                }
+                placeholder="e.g., Technology, Healthcare"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="aiCompanySize">Company Size</Label>
+              <Input
+                id="aiCompanySize"
+                value={aiGenerationInput.companySize}
+                onChange={(e) =>
+                  setAiGenerationInput({ ...aiGenerationInput, companySize: e.target.value })
+                }
+                placeholder="e.g., 50-100 employees"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="aiFocusAreas">Focus Areas (comma-separated)</Label>
+              <Input
+                id="aiFocusAreas"
+                value={aiGenerationInput.focusAreas}
+                onChange={(e) =>
+                  setAiGenerationInput({ ...aiGenerationInput, focusAreas: e.target.value })
+                }
+                placeholder="e.g., Ergonomic, Lighting, Air Quality"
+              />
+            </div>
+          </div>
+          <Button onClick={handleGenerateWithAI} disabled={isGeneratingAI}>
+            {isGeneratingAI ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Generate Questions with AI
+              </>
+            )}
+          </Button>
+          {questions.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {questions.length} question{questions.length !== 1 ? 's' : ''} generated. You can edit
+              them below.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Basic Info */}
       <Card>

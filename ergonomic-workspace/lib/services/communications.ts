@@ -9,6 +9,16 @@ import { serverTimestamp, toPlainObject, timestampToDate } from '@/lib/db-utils'
 import { CommunicationType } from '@/lib/types/firestore';
 import { getUserById } from './users';
 
+export interface ActionItem {
+  id: string;
+  description: string;
+  assignedTo: string | null;
+  dueDate: Date | null;
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+  completedAt: Date | null;
+  completedBy: string | null;
+}
+
 export interface CommunicationListItem {
   id: string;
   type: CommunicationType;
@@ -19,6 +29,8 @@ export interface CommunicationListItem {
   user: {
     displayName: string;
   };
+  actionItemsCount?: number;
+  attachmentsCount?: number;
 }
 
 export interface CreateCommunicationData {
@@ -30,6 +42,7 @@ export interface CreateCommunicationData {
   date: Date;
   duration?: number;
   attachments?: string[];
+  actionItems?: Omit<ActionItem, 'id'>[];
   userId: string;
 }
 
@@ -44,17 +57,38 @@ export async function getClientCommunications(
   clientId: string,
   limit: number = 50
 ): Promise<CommunicationListItem[]> {
-  const snapshot = await collections
-    .communications()
-    .where('clientId', '==', clientId)
-    .orderBy('date', 'desc')
-    .limit(limit)
-    .get();
+  let snapshot;
+  let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+
+  try {
+    snapshot = await collections
+      .communications()
+      .where('clientId', '==', clientId)
+      .orderBy('date', 'desc')
+      .limit(limit)
+      .get();
+    docs = snapshot.docs;
+  } catch (error) {
+    console.warn('Could not order by date, querying without order:', error);
+    snapshot = await collections
+      .communications()
+      .where('clientId', '==', clientId)
+      .limit(limit)
+      .get();
+    docs = [...snapshot.docs].sort((a, b) => {
+      const aDate = timestampToDate(a.data().date);
+      const bDate = timestampToDate(b.data().date);
+      if (!aDate || !bDate) return 0;
+      return bDate.getTime() - aDate.getTime(); // desc
+    });
+  }
 
   const communications = await Promise.all(
-    snapshot.docs.map(async (doc) => {
+    docs.map(async (doc) => {
       const data = doc.data();
       const user = await getUserById(data.userId);
+      const actionItems = (data.actionItems as ActionItem[] | null) || [];
+      const attachments = (data.attachments as string[] | null) || [];
 
       return {
         id: doc.id,
@@ -66,6 +100,8 @@ export async function getClientCommunications(
         user: {
           displayName: user?.displayName || 'Unknown',
         },
+        actionItemsCount: actionItems.length,
+        attachmentsCount: attachments.length,
       };
     })
   );
@@ -81,6 +117,13 @@ export async function getClientCommunications(
  */
 export async function createCommunication(data: CreateCommunicationData) {
   const id = generateId();
+  
+  // Generate IDs for action items
+  const actionItems = data.actionItems?.map((item) => ({
+    ...item,
+    id: generateId(),
+  })) || [];
+
   const communicationData = {
     id,
     clientId: data.clientId,
@@ -91,6 +134,7 @@ export async function createCommunication(data: CreateCommunicationData) {
     date: data.date,
     duration: data.duration || null,
     attachments: data.attachments || null,
+    actionItems: actionItems.length > 0 ? actionItems : null,
     userId: data.userId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -103,6 +147,7 @@ export async function createCommunication(data: CreateCommunicationData) {
     ...communicationData,
     createdAt: new Date(),
     updatedAt: new Date(),
+    actionItems,
   };
 }
 
@@ -118,6 +163,11 @@ export async function getCommunicationById(id: string) {
 
   const data = doc.data()!;
   const user = await getUserById(data.userId);
+  const actionItems = ((data.actionItems as ActionItem[] | null) || []).map((item) => ({
+    ...item,
+    dueDate: item.dueDate ? timestampToDate(item.dueDate) : null,
+    completedAt: item.completedAt ? timestampToDate(item.completedAt) : null,
+  }));
 
   return {
     id: doc.id,
@@ -129,6 +179,43 @@ export async function getCommunicationById(id: string) {
       displayName: user?.displayName || 'Unknown',
       email: user?.email || '',
     },
-    actionItems: [], // TODO: Implement action items if needed
+    actionItems,
+    attachments: (data.attachments as string[] | null) || [],
   };
+}
+
+/**
+ * Update an action item status
+ */
+export async function updateActionItem(
+  communicationId: string,
+  actionItemId: string,
+  updates: Partial<ActionItem>,
+  userId: string
+) {
+  const doc = await collections.communications().doc(communicationId).get();
+
+  if (!doc.exists) {
+    throw new Error('Communication not found');
+  }
+
+  const data = doc.data()!;
+  const actionItems = ((data.actionItems as ActionItem[] | null) || []).map((item) => {
+    if (item.id === actionItemId) {
+      return {
+        ...item,
+        ...updates,
+        completedAt: updates.status === 'COMPLETED' ? new Date() : item.completedAt,
+        completedBy: updates.status === 'COMPLETED' ? userId : item.completedBy,
+      };
+    }
+    return item;
+  });
+
+  await collections.communications().doc(communicationId).update({
+    actionItems,
+    updatedAt: serverTimestamp(),
+  });
+
+  return actionItems.find((item) => item.id === actionItemId);
 }

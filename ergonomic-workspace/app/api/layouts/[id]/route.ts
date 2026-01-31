@@ -47,7 +47,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const { id } = await params;
-    if (!isValidUUID(id)) {
+    if (!id || id.trim().length === 0) {
       return NextResponse.json({ error: 'Invalid layout ID' }, { status: 400 });
     }
 

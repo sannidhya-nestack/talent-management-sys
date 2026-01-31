@@ -16,6 +16,7 @@ import { useTransition } from 'react';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { signOutAction } from '@/app/actions';
+import { AICopilot } from '@/components/ai/copilot';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -65,6 +66,9 @@ export function DashboardLayout({ children, user }: DashboardLayoutProps) {
           </div>
         </div>
       )}
+
+      {/* AI Copilot */}
+      <AICopilot />
     </div>
   );
 }

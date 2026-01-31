@@ -20,6 +20,8 @@ export const COLLECTIONS = {
   QUESTIONNAIRE_TEMPLATES: 'questionnaireTemplates',
   QUESTIONNAIRE_RESPONSES: 'questionnaireResponses',
   DOCUMENTS: 'documents',
+  DOCUMENT_VERSIONS: 'documentVersions',
+  SHARED_DOCUMENTS: 'sharedDocuments',
   ACTIVITIES: 'activities',
   COMMUNICATIONS: 'communications',
   INVOICES: 'invoices',
@@ -32,6 +34,12 @@ export const COLLECTIONS = {
   ACCOUNTING_ACCOUNTS: 'accountingAccounts',
   AI_CONVERSATIONS: 'aiConversations',
   AUDIT_LOGS: 'auditLogs',
+  REMINDERS: 'reminders',
+  PROPOSALS: 'proposals',
+  EMAIL_LOGS: 'emailLogs',
+  CALENDAR_EVENTS: 'calendarEvents',
+  TEAM_MEMBERS: 'teamMembers',
+  INSTALLATION_TEAMS: 'installationTeams',
 } as const;
 
 // Enums
@@ -122,9 +130,21 @@ export enum CommunicationType {
 
 export enum InstallationStatus {
   SCHEDULED = 'SCHEDULED',
+  ORDERED = 'ORDERED',
+  IN_TRANSIT = 'IN_TRANSIT',
+  DELIVERED_TO_WAREHOUSE = 'DELIVERED_TO_WAREHOUSE',
+  DELIVERED_TO_SITE = 'DELIVERED_TO_SITE',
   IN_PROGRESS = 'IN_PROGRESS',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
+}
+
+export enum DeliveryStatus {
+  ORDERED = 'ORDERED',
+  IN_TRANSIT = 'IN_TRANSIT',
+  DELIVERED_TO_WAREHOUSE = 'DELIVERED_TO_WAREHOUSE',
+  DELIVERED_TO_SITE = 'DELIVERED_TO_SITE',
+  INSTALLATION_COMPLETE = 'INSTALLATION_COMPLETE',
 }
 
 export enum QuestionType {

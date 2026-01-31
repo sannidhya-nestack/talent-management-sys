@@ -8,7 +8,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Save, Edit } from 'lucide-react';
+import { ArrowLeft, Save, Edit, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { AssessmentStatus, AssessmentType } from '@/lib/types/firestore';
 import { formatDate } from '@/lib/utils';
+import type { AssessmentReport } from '@/lib/services/assessments/reports';
 
 const typeLabels: Record<AssessmentType, string> = {
   WORKSPACE: 'Workspace',
@@ -86,6 +87,9 @@ export function AssessmentDetailPageClient({ assessment: initialAssessment }: As
   const { toast } = useToast();
   const [isEditing, setIsEditing] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isGeneratingReport, setIsGeneratingReport] = React.useState(false);
+  const [report, setReport] = React.useState<AssessmentReport | null>(null);
+  const [showReport, setShowReport] = React.useState(false);
 
   // Form state
   const [type, setType] = React.useState<AssessmentType>(initialAssessment.type);
@@ -136,6 +140,39 @@ export function AssessmentDetailPageClient({ assessment: initialAssessment }: As
     }
   };
 
+  const handleGenerateReport = async () => {
+    setIsGeneratingReport(true);
+
+    try {
+      const response = await fetch(`/api/assessments/${initialAssessment.id}/report`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate report');
+      }
+
+      const data = await response.json();
+      setReport(data.report);
+      setShowReport(true);
+
+      toast({
+        title: 'Success',
+        description: 'Assessment report generated successfully',
+      });
+    } catch (error) {
+      console.error('Error generating report:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to generate report',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -152,10 +189,29 @@ export function AssessmentDetailPageClient({ assessment: initialAssessment }: As
           </div>
         </div>
         {!isEditing && (
-          <Button onClick={() => setIsEditing(true)}>
-            <Edit className="h-4 w-4 mr-2" />
-            Edit
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleGenerateReport}
+              disabled={isGeneratingReport}
+              variant="outline"
+            >
+              {isGeneratingReport ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Generate Report
+                </>
+              )}
+            </Button>
+            <Button onClick={() => setIsEditing(true)}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          </div>
         )}
       </div>
 
@@ -318,6 +374,155 @@ export function AssessmentDetailPageClient({ assessment: initialAssessment }: As
           )}
         </CardContent>
       </Card>
+
+      {/* Assessment Report */}
+      {showReport && report && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Assessment Report</CardTitle>
+            <CardDescription>
+              AI-generated assessment report with recommendations and product suggestions
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Executive Summary */}
+            <div className="space-y-2">
+              <h3 className="text-lg font-semibold">Executive Summary</h3>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{report.executiveSummary}</p>
+            </div>
+
+            {/* Key Findings */}
+            {report.keyFindings && report.keyFindings.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Key Findings</h3>
+                <div className="space-y-3">
+                  {report.keyFindings.map((finding, index) => (
+                    <div key={index} className="p-3 border rounded-lg">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium">{finding.finding}</span>
+                        <Badge
+                          variant={
+                            finding.severity === 'HIGH'
+                              ? 'destructive'
+                              : finding.severity === 'MEDIUM'
+                              ? 'default'
+                              : 'secondary'
+                          }
+                        >
+                          {finding.severity}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{finding.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Risk Analysis */}
+            {report.riskAnalysis && (
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Risk Analysis</h3>
+                <div className="p-3 border rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-medium">Overall Risk</span>
+                    <Badge
+                      variant={
+                        report.riskAnalysis.overallRisk === 'HIGH'
+                          ? 'destructive'
+                          : report.riskAnalysis.overallRisk === 'MEDIUM'
+                          ? 'default'
+                          : 'secondary'
+                      }
+                    >
+                      {report.riskAnalysis.overallRisk}
+                    </Badge>
+                  </div>
+                  {report.riskAnalysis.riskFactors && report.riskAnalysis.riskFactors.length > 0 && (
+                    <div className="space-y-2">
+                      {report.riskAnalysis.riskFactors.map((factor, index) => (
+                        <div key={index} className="text-sm">
+                          <span className="font-medium">{factor.factor}:</span>{' '}
+                          <span className="text-muted-foreground">{factor.impact}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Recommendations */}
+            {report.recommendations && report.recommendations.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Recommendations</h3>
+                <div className="space-y-3">
+                  {report.recommendations.map((rec, index) => (
+                    <div key={index} className="p-3 border rounded-lg">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium">{rec.recommendation}</span>
+                        <Badge
+                          variant={
+                            rec.priority === 'HIGH'
+                              ? 'destructive'
+                              : rec.priority === 'MEDIUM'
+                              ? 'default'
+                              : 'secondary'
+                          }
+                        >
+                          {rec.priority} Priority
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{rec.rationale}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Product Suggestions */}
+            {report.productSuggestions && report.productSuggestions.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Product Suggestions</h3>
+                <div className="space-y-3">
+                  {report.productSuggestions.map((product, index) => (
+                    <div key={index} className="p-3 border rounded-lg">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium">{product.productName}</span>
+                        <span className="text-sm font-semibold">${product.estimatedCost.toLocaleString()}</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{product.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Cost Estimates */}
+            {report.costEstimates && (
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Cost Estimates</h3>
+                <div className="p-3 border rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-medium">Total Estimated Cost</span>
+                    <span className="text-lg font-bold">${report.costEstimates.total.toLocaleString()}</span>
+                  </div>
+                  {report.costEstimates.breakdown && report.costEstimates.breakdown.length > 0 && (
+                    <div className="space-y-2">
+                      {report.costEstimates.breakdown.map((item, index) => (
+                        <div key={index} className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">{item.category}</span>
+                          <span className="font-medium">${item.amount.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

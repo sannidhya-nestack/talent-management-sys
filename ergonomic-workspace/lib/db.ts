@@ -47,6 +47,8 @@ export const collections = {
   questionnaireTemplates: () => getDb().collection(COLLECTIONS.QUESTIONNAIRE_TEMPLATES),
   questionnaireResponses: () => getDb().collection(COLLECTIONS.QUESTIONNAIRE_RESPONSES),
   documents: () => getDb().collection(COLLECTIONS.DOCUMENTS),
+  documentVersions: () => getDb().collection(COLLECTIONS.DOCUMENT_VERSIONS),
+  sharedDocuments: () => getDb().collection(COLLECTIONS.SHARED_DOCUMENTS),
   activities: () => getDb().collection(COLLECTIONS.ACTIVITIES),
   communications: () => getDb().collection(COLLECTIONS.COMMUNICATIONS),
   invoices: () => getDb().collection(COLLECTIONS.INVOICES),
@@ -59,6 +61,8 @@ export const collections = {
   accountingAccounts: () => getDb().collection(COLLECTIONS.ACCOUNTING_ACCOUNTS),
   aiConversations: () => getDb().collection(COLLECTIONS.AI_CONVERSATIONS),
   auditLogs: () => getDb().collection(COLLECTIONS.AUDIT_LOGS),
+  teamMembers: () => getDb().collection(COLLECTIONS.TEAM_MEMBERS),
+  installationTeams: () => getDb().collection(COLLECTIONS.INSTALLATION_TEAMS),
 };
 
 /**

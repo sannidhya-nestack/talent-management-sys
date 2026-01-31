@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { AssessmentType, AssessmentStatus } from '@/lib/types/firestore';
+import { Calendar, MapPin } from 'lucide-react';
 
 const typeLabels: Record<AssessmentType, string> = {
   WORKSPACE: 'Workspace',
@@ -51,9 +52,13 @@ export function NewAssessmentPageClient() {
   const [status, setStatus] = React.useState<AssessmentStatus>('SCHEDULED');
   const [conductedDate, setConductedDate] = React.useState('');
   const [notes, setNotes] = React.useState('');
-  const [clients, setClients] = React.useState<Array<{ id: string; companyName: string }>>([]);
+  const [location, setLocation] = React.useState('');
+  const [duration, setDuration] = React.useState('2'); // Default 2 hours
+  const [clients, setClients] = React.useState<Array<{ id: string; companyName: string; address?: string }>>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isLoadingClients, setIsLoadingClients] = React.useState(true);
+  const [hasCalendarConnected, setHasCalendarConnected] = React.useState(false);
+  const [createCalendarEvent, setCreateCalendarEvent] = React.useState(true);
 
   // Fetch clients
   React.useEffect(() => {
@@ -73,6 +78,26 @@ export function NewAssessmentPageClient() {
 
     fetchClients();
   }, []);
+
+  // Check if calendar is connected
+  React.useEffect(() => {
+    fetch('/api/integrations/calendar/accounts')
+      .then((res) => res.json())
+      .then((data) => {
+        setHasCalendarConnected(data.accounts && data.accounts.length > 0);
+      })
+      .catch(console.error);
+  }, []);
+
+  // Auto-fill location when client is selected
+  React.useEffect(() => {
+    if (clientId) {
+      const client = clients.find((c) => c.id === clientId);
+      if (client && client.address && !location) {
+        setLocation(client.address);
+      }
+    }
+  }, [clientId, clients, location]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +123,36 @@ export function NewAssessmentPageClient() {
       }
 
       const { assessment } = await response.json();
+
+      // Create calendar event if requested and calendar is connected
+      if (createCalendarEvent && hasCalendarConnected && conductedDate) {
+        try {
+          const assessmentDate = new Date(conductedDate);
+          const endDate = new Date(assessmentDate);
+          endDate.setHours(endDate.getHours() + parseInt(duration));
+
+          await fetch('/api/calendar/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              summary: `${typeLabels[type]} Assessment - ${clients.find((c) => c.id === clientId)?.companyName || 'Client'}`,
+              description: notes || `Workspace assessment for client`,
+              start: {
+                dateTime: assessmentDate.toISOString(),
+                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              },
+              end: {
+                dateTime: endDate.toISOString(),
+                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              },
+              location: location || undefined,
+            }),
+          });
+        } catch (error) {
+          console.error('Error creating calendar event:', error);
+          // Don't fail the assessment creation if calendar event fails
+        }
+      }
 
       toast({
         title: 'Success',
@@ -211,14 +266,87 @@ export function NewAssessmentPageClient() {
 
             {/* Conducted Date */}
             <div className="space-y-2">
-              <Label htmlFor="conductedDate">Conducted Date</Label>
+              <Label htmlFor="conductedDate">Conducted Date & Time *</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="conductedDate"
+                  type="datetime-local"
+                  value={conductedDate}
+                  onChange={(e) => setConductedDate(e.target.value)}
+                  required
+                />
+                {hasCalendarConnected && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      // Fetch calendar availability
+                      try {
+                        const response = await fetch('/api/calendar/availability');
+                        if (response.ok) {
+                          const data = await response.json();
+                          // Show availability in a dialog or suggest times
+                          toast({
+                            title: 'Calendar Available',
+                            description: 'Check your calendar for available times',
+                          });
+                        }
+                      } catch (error) {
+                        console.error('Error checking availability:', error);
+                      }
+                    }}
+                  >
+                    <Calendar className="h-4 w-4 mr-2" />
+                    Check Availability
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Duration */}
+            <div className="space-y-2">
+              <Label htmlFor="duration">Duration (hours)</Label>
               <Input
-                id="conductedDate"
-                type="datetime-local"
-                value={conductedDate}
-                onChange={(e) => setConductedDate(e.target.value)}
+                id="duration"
+                type="number"
+                min="1"
+                max="8"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                placeholder="2"
               />
             </div>
+
+            {/* Location */}
+            <div className="space-y-2">
+              <Label htmlFor="location">Location</Label>
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="location"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="Assessment location (auto-filled from client address)"
+                />
+              </div>
+            </div>
+
+            {/* Create Calendar Event */}
+            {hasCalendarConnected && (
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="createCalendarEvent"
+                  checked={createCalendarEvent}
+                  onChange={(e) => setCreateCalendarEvent(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <Label htmlFor="createCalendarEvent" className="cursor-pointer">
+                  Create calendar event for this assessment
+                </Label>
+              </div>
+            )}
 
             {/* Notes */}
             <div className="space-y-2">

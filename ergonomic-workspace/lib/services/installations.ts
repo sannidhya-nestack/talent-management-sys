@@ -6,8 +6,18 @@
 
 import { collections, generateId } from '@/lib/db';
 import { serverTimestamp, toPlainObject, timestampToDate } from '@/lib/db-utils';
-import { InstallationStatus } from '@/lib/types/firestore';
+import { InstallationStatus, DeliveryStatus } from '@/lib/types/firestore';
 import { getClientById } from './clients';
+
+export interface DeliveryUpdate {
+  status: DeliveryStatus;
+  date: Date;
+  location?: string;
+  notes?: string;
+  photos?: string[];
+  signature?: string; // Base64 encoded signature image
+  confirmedBy?: string;
+}
 
 export interface InstallationListItem {
   id: string;
@@ -15,8 +25,11 @@ export interface InstallationListItem {
   projectId: string | null;
   scheduledDate: Date;
   status: InstallationStatus;
+  deliveryStatus?: DeliveryStatus;
   deliveryDate: Date | null;
+  deliveryUpdates?: DeliveryUpdate[];
   completionDate: Date | null;
+  photos?: string[];
   client: {
     id: string;
     companyName: string;
@@ -121,14 +134,23 @@ export async function getInstallations(options?: {
         }
       }
 
+      const deliveryUpdates = (data.deliveryUpdates as DeliveryUpdate[] | null) || [];
+      const deliveryUpdatesWithDates = deliveryUpdates.map((update) => ({
+        ...update,
+        date: timestampToDate(update.date) || new Date(),
+      }));
+
       return {
         id: doc.id,
         clientId: data.clientId || '',
         projectId: data.projectId || null,
         scheduledDate: timestampToDate(data.scheduledDate) || new Date(),
         status: (data.status as InstallationStatus) || 'SCHEDULED',
+        deliveryStatus: (data.deliveryStatus as DeliveryStatus) || undefined,
         deliveryDate: timestampToDate(data.deliveryDate) || null,
+        deliveryUpdates: deliveryUpdatesWithDates.length > 0 ? deliveryUpdatesWithDates : undefined,
         completionDate: timestampToDate(data.completionDate) || null,
+        photos: (data.photos as string[] | null) || undefined,
         client: {
           id: client?.id || data.clientId || '',
           companyName: client?.companyName || 'Unknown',
@@ -169,12 +191,20 @@ export async function getInstallationById(id: string) {
     data.projectId ? collections.projects().doc(data.projectId).get() : null,
   ]);
 
+  const deliveryUpdates = ((data.deliveryUpdates as DeliveryUpdate[] | null) || []).map((update) => ({
+    ...update,
+    date: timestampToDate(update.date) || new Date(),
+  }));
+
   return {
     id: doc.id,
     ...toPlainObject(data),
     scheduledDate: timestampToDate(data.scheduledDate) || new Date(),
+    deliveryStatus: (data.deliveryStatus as DeliveryStatus) || undefined,
     deliveryDate: timestampToDate(data.deliveryDate),
+    deliveryUpdates: deliveryUpdates.length > 0 ? deliveryUpdates : undefined,
     completionDate: timestampToDate(data.completionDate),
+    photos: (data.photos as string[] | null) || undefined,
     createdAt: timestampToDate(data.createdAt) || new Date(),
     updatedAt: timestampToDate(data.updatedAt) || new Date(),
     client: client
@@ -248,7 +278,9 @@ export async function updateInstallation(
   id: string,
   data: Partial<CreateInstallationData> & {
     status?: InstallationStatus;
+    deliveryStatus?: DeliveryStatus;
     completionDate?: Date;
+    photos?: string[];
   }
 ) {
   const updateData: Record<string, any> = {
@@ -258,11 +290,49 @@ export async function updateInstallation(
   if (data.scheduledDate) updateData.scheduledDate = data.scheduledDate;
   if (data.deliveryDate !== undefined) updateData.deliveryDate = data.deliveryDate;
   if (data.status) updateData.status = data.status;
+  if (data.deliveryStatus) updateData.deliveryStatus = data.deliveryStatus;
   if (data.completionDate !== undefined) updateData.completionDate = data.completionDate;
   if (data.teamMembers !== undefined) updateData.teamMembers = data.teamMembers;
   if (data.notes !== undefined) updateData.notes = data.notes;
+  if (data.photos !== undefined) updateData.photos = data.photos;
 
   await collections.installations().doc(id).update(updateData);
+}
+
+/**
+ * Add a delivery status update
+ */
+export async function addDeliveryUpdate(
+  installationId: string,
+  update: DeliveryUpdate,
+  userId: string
+) {
+  const doc = await collections.installations().doc(installationId).get();
+
+  if (!doc.exists) {
+    throw new Error('Installation not found');
+  }
+
+  const data = doc.data()!;
+  const existingUpdates = ((data.deliveryUpdates as DeliveryUpdate[] | null) || []).map((u) => ({
+    ...u,
+    date: timestampToDate(u.date) || new Date(),
+  }));
+
+  const newUpdate: DeliveryUpdate = {
+    ...update,
+    confirmedBy: userId,
+  };
+
+  await collections.installations().doc(installationId).update({
+    deliveryStatus: update.status,
+    deliveryUpdates: [...existingUpdates, newUpdate],
+    deliveryDate: update.status === DeliveryStatus.DELIVERED_TO_SITE ? update.date : data.deliveryDate,
+    updatedAt: serverTimestamp(),
+  });
+
+  return newUpdate;
+}
 
   // Get updated installation with related data
   const installation = await getInstallationById(id);
