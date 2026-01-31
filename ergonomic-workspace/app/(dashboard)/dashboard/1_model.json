@@ -1,0 +1,50 @@
+{
+  "_metadata": {
+    "collectionName": "dashboard",
+    "documentId": "main"
+  },
+  "recentClients": [
+    {
+      "id": "sample-client-1",
+      "companyName": "Acme Corporation",
+      "industry": "Technology",
+      "status": "ACTIVE",
+      "createdAt": "2024-01-15T10:00:00Z",
+      "updatedAt": "2024-01-15T10:00:00Z",
+      "_count": {
+        "projects": 2,
+        "assessments": 1,
+        "documents": 3,
+        "invoices": 1
+      }
+    },
+    {
+      "id": "sample-client-2",
+      "companyName": "TechStart Inc",
+      "industry": "Software",
+      "status": "PROSPECT",
+      "createdAt": "2024-01-20T10:00:00Z",
+      "updatedAt": "2024-01-20T10:00:00Z",
+      "_count": {
+        "projects": 0,
+        "assessments": 0,
+        "documents": 1,
+        "invoices": 0
+      }
+    },
+    {
+      "id": "sample-client-3",
+      "companyName": "Global Solutions Ltd",
+      "industry": "Consulting",
+      "status": "ACTIVE",
+      "createdAt": "2024-01-10T10:00:00Z",
+      "updatedAt": "2024-01-25T10:00:00Z",
+      "_count": {
+        "projects": 3,
+        "assessments": 2,
+        "documents": 5,
+        "invoices": 2
+      }
+    }
+  ]
+}

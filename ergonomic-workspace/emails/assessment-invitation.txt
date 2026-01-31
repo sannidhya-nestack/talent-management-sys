@@ -1,0 +1,12 @@
+Workspace Assessment Invitation
+
+Hello,
+
+You have been invited to complete a workspace assessment questionnaire for {{CLIENT_NAME}}.
+
+Please access the questionnaire at: {{QUESTIONNAIRE_URL}}
+
+If you have any questions, please don't hesitate to contact us.
+
+Best regards,
+{{ORGANISATION_NAME}}

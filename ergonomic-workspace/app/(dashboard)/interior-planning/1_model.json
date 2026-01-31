@@ -1,0 +1,53 @@
+{
+  "_metadata": {
+    "collectionName": "interior-planning",
+    "documentId": "main"
+  },
+  "layouts": [
+    {
+      "id": "layout-1",
+      "clientId": "sample-client-1",
+      "projectId": "project-1",
+      "name": "Main Office Floor Plan",
+      "description": "Open workspace layout with ergonomic workstations",
+      "floorPlanUrl": "/floor-plans/layout-1.pdf",
+      "layoutData": {
+        "rooms": 12,
+        "workstations": 45,
+        "meetingRooms": 3
+      },
+      "createdAt": "2024-01-16T10:00:00Z",
+      "client": {
+        "id": "sample-client-1",
+        "companyName": "Acme Corporation"
+      },
+      "project": {
+        "id": "project-1",
+        "name": "Main Office Redesign"
+      }
+    },
+    {
+      "id": "layout-2",
+      "clientId": "sample-client-3",
+      "projectId": "project-2",
+      "name": "Executive Suite Layout",
+      "description": "Private offices and collaboration spaces",
+      "floorPlanUrl": "/floor-plans/layout-2.pdf",
+      "layoutData": {
+        "rooms": 8,
+        "workstations": 20,
+        "meetingRooms": 2
+      },
+      "createdAt": "2024-01-18T10:00:00Z",
+      "client": {
+        "id": "sample-client-3",
+        "companyName": "Global Solutions Ltd"
+      },
+      "project": {
+        "id": "project-2",
+        "name": "Headquarters Renovation"
+      }
+    }
+  ],
+  "total": 2
+}

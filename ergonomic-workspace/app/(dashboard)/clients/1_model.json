@@ -1,0 +1,40 @@
+{
+  "_metadata": {
+    "collectionName": "clients",
+    "documentId": "main"
+  },
+  "clients": [
+    {
+      "id": "sample-client-1",
+      "companyName": "Acme Corporation",
+      "industry": "Technology",
+      "status": "ACTIVE",
+      "createdAt": "2024-01-15T10:00:00Z",
+      "updatedAt": "2024-01-15T10:00:00Z",
+      "_count": {
+        "projects": 2,
+        "assessments": 1,
+        "documents": 3,
+        "invoices": 1
+      }
+    },
+    {
+      "id": "sample-client-2",
+      "companyName": "TechStart Inc",
+      "industry": "Software",
+      "status": "PROSPECT",
+      "createdAt": "2024-01-20T10:00:00Z",
+      "updatedAt": "2024-01-20T10:00:00Z",
+      "_count": {
+        "projects": 0,
+        "assessments": 0,
+        "documents": 1,
+        "invoices": 0
+      }
+    }
+  ],
+  "total": 2,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 1
+}

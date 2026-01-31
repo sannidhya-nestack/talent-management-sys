@@ -1,0 +1,33 @@
+{
+  "_metadata": {
+    "collectionName": "questionnaires",
+    "documentId": "main"
+  },
+  "questionnaires": [
+    {
+      "id": "questionnaire-template-1",
+      "name": "Workspace Ergonomic Assessment",
+      "slug": "questionnaire-template-1",
+      "isActive": true,
+      "questionsCount": 15,
+      "responsesCount": 3,
+      "createdAt": "2024-01-10T10:00:00Z",
+      "creator": {
+        "displayName": "Dr. Jane Consultant"
+      }
+    },
+    {
+      "id": "questionnaire-template-2",
+      "name": "Office Environment Survey",
+      "slug": "questionnaire-template-2",
+      "isActive": true,
+      "questionsCount": 12,
+      "responsesCount": 1,
+      "createdAt": "2024-01-12T10:00:00Z",
+      "creator": {
+        "displayName": "Dr. Jane Consultant"
+      }
+    }
+  ],
+  "total": 2
+}

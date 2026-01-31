@@ -1,0 +1,47 @@
+{
+  "_metadata": {
+    "collectionName": "assessments",
+    "documentId": "main"
+  },
+  "assessments": [
+    {
+      "id": "assessment-1",
+      "clientId": "sample-client-1",
+      "projectId": "project-1",
+      "type": "COMPREHENSIVE",
+      "status": "COMPLETED",
+      "conductedDate": "2024-01-18T14:00:00Z",
+      "reportUrl": "/reports/assessment-1.pdf",
+      "client": {
+        "id": "sample-client-1",
+        "companyName": "Acme Corporation"
+      },
+      "project": {
+        "id": "project-1",
+        "name": "Main Office Redesign"
+      },
+      "conductedByUser": {
+        "id": "user-1",
+        "displayName": "Dr. Jane Consultant"
+      },
+      "createdAt": "2024-01-15T10:00:00Z"
+    },
+    {
+      "id": "assessment-2",
+      "clientId": "sample-client-2",
+      "projectId": null,
+      "type": "ERGONOMIC",
+      "status": "SCHEDULED",
+      "conductedDate": null,
+      "reportUrl": null,
+      "client": {
+        "id": "sample-client-2",
+        "companyName": "TechStart Inc"
+      },
+      "project": null,
+      "conductedByUser": null,
+      "createdAt": "2024-01-20T10:00:00Z"
+    }
+  ],
+  "total": 2
+}

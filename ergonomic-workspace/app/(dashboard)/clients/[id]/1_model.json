@@ -1,0 +1,42 @@
+{
+  "_metadata": {
+    "collectionName": "client-detail",
+    "documentId": "main"
+  },
+  "client": {
+    "id": "sample-client-1",
+    "companyName": "Acme Corporation",
+    "industry": "Technology",
+    "status": "ACTIVE",
+    "initialScope": "Complete ergonomic assessment and workspace redesign for new office space",
+    "budgetRange": "FIFTY_TO_100K",
+    "address": "123 Business Park Drive",
+    "city": "San Francisco",
+    "state": "CA",
+    "country": "USA",
+    "postalCode": "94105",
+    "website": "https://acmecorp.com",
+    "notes": "Priority client - fast-growing tech company",
+    "createdAt": "2024-01-15T10:00:00Z",
+    "updatedAt": "2024-01-15T10:00:00Z",
+    "createdBy": "sample-user-1",
+    "contacts": [
+      {
+        "id": "contact-1",
+        "name": "John Smith",
+        "email": "john.smith@acmecorp.com",
+        "phone": "+1-555-0101",
+        "jobTitle": "VP of Operations",
+        "isPrimary": true
+      },
+      {
+        "id": "contact-2",
+        "name": "Sarah Johnson",
+        "email": "sarah.johnson@acmecorp.com",
+        "phone": "+1-555-0102",
+        "jobTitle": "Facilities Manager",
+        "isPrimary": false
+      }
+    ]
+  }
+}
