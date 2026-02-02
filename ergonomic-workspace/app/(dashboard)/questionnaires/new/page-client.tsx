@@ -82,12 +82,18 @@ export function NewQuestionnairePageClient() {
     }
   }, [name, slug]);
 
+  // Check if AI generation inputs are valid
+  const isAIInputValid = aiGenerationInput.clientName.trim().length > 0 && aiGenerationInput.industry.trim().length > 0;
+
   // Generate questions using AI
   const handleGenerateWithAI = async () => {
-    if (!aiGenerationInput.clientName || !aiGenerationInput.industry) {
+    const trimmedClientName = aiGenerationInput.clientName.trim();
+    const trimmedIndustry = aiGenerationInput.industry.trim();
+
+    if (!trimmedClientName || !trimmedIndustry) {
       toast({
-        title: 'Error',
-        description: 'Client name and industry are required for AI generation',
+        title: 'Missing Required Fields',
+        description: 'Please fill in both Client Name and Industry fields before generating questions.',
         variant: 'destructive',
       });
       return;
@@ -263,10 +269,18 @@ export function NewQuestionnairePageClient() {
     updateQuestion(questionId, { options: newOptions });
   };
 
+  // Check if form is valid for submission
+  const isFormValid = name.trim().length > 0 && questions.length > 0 && questions.every(q => q.text.trim().length > 0);
+
   // Handle submit
   const handleSubmit = async () => {
-    if (!name.trim()) {
-      toast({ title: 'Error', description: 'Name is required', variant: 'destructive' });
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      toast({ 
+        title: 'Missing Required Field', 
+        description: 'Please enter a questionnaire name before submitting.', 
+        variant: 'destructive' 
+      });
       return;
     }
 
@@ -373,6 +387,7 @@ export function NewQuestionnairePageClient() {
                   setAiGenerationInput({ ...aiGenerationInput, clientName: e.target.value })
                 }
                 placeholder="e.g., Acme Corporation"
+                required
               />
             </div>
             <div className="space-y-2">
@@ -384,6 +399,7 @@ export function NewQuestionnairePageClient() {
                   setAiGenerationInput({ ...aiGenerationInput, industry: e.target.value })
                 }
                 placeholder="e.g., Technology, Healthcare"
+                required
               />
             </div>
             <div className="space-y-2">
@@ -409,7 +425,7 @@ export function NewQuestionnairePageClient() {
               />
             </div>
           </div>
-          <Button onClick={handleGenerateWithAI} disabled={isGeneratingAI}>
+          <Button onClick={handleGenerateWithAI} disabled={isGeneratingAI || !isAIInputValid}>
             {isGeneratingAI ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -422,6 +438,11 @@ export function NewQuestionnairePageClient() {
               </>
             )}
           </Button>
+          {!isAIInputValid && (
+            <p className="text-sm text-muted-foreground">
+              Please fill in Client Name and Industry to generate questions.
+            </p>
+          )}
           {questions.length > 0 && (
             <p className="text-sm text-muted-foreground">
               {questions.length} question{questions.length !== 1 ? 's' : ''} generated. You can edit
@@ -445,6 +466,7 @@ export function NewQuestionnairePageClient() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g., Workspace Ergonomic Assessment"
+              required
             />
           </div>
           <div className="space-y-2">
@@ -541,14 +563,25 @@ export function NewQuestionnairePageClient() {
       </Card>
 
       {/* Actions */}
-      <div className="flex justify-end gap-4">
-        <Button variant="outline" onClick={() => router.back()}>
-          Cancel
-        </Button>
-        <Button onClick={handleSubmit} disabled={isSubmitting}>
-          <Save className="h-4 w-4 mr-2" />
-          {isSubmitting ? 'Creating...' : 'Create Questionnaire'}
-        </Button>
+      <div className="space-y-2">
+        {!isFormValid && (
+          <div className="text-sm text-muted-foreground">
+            {!name.trim() && <p>Please enter a questionnaire name.</p>}
+            {name.trim() && questions.length === 0 && <p>Please add at least one question.</p>}
+            {name.trim() && questions.length > 0 && questions.some(q => !q.text.trim()) && (
+              <p>All questions must have text.</p>
+            )}
+          </div>
+        )}
+        <div className="flex justify-end gap-4">
+          <Button variant="outline" onClick={() => router.back()}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting || !isFormValid}>
+            <Save className="h-4 w-4 mr-2" />
+            {isSubmitting ? 'Creating...' : 'Create Questionnaire'}
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -22,15 +22,36 @@ export default async function ClientsPage({
   const sortBy = (params.sortBy as string) || 'createdAt';
   const sortOrder = (params.sortOrder as 'asc' | 'desc') || 'desc';
 
-  const result = await getClients({
-    status,
-    industry,
-    search,
-    page,
-    limit,
-    sortBy,
-    sortOrder,
-  });
+  let result;
+  try {
+    result = await getClients({
+      status,
+      industry,
+      search,
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error fetching clients:', errorMessage);
+    
+    // Check if it's a Firebase configuration error
+    if (errorMessage.includes('DECODER') || 
+        errorMessage.includes('Missing required Firebase') ||
+        errorMessage.includes('FIREBASE_ADMIN')) {
+      console.error(
+        '\n⚠️  Firebase Admin is not properly configured.\n' +
+        'Please check your .env file and ensure FIREBASE_ADMIN_PRIVATE_KEY, ' +
+        'FIREBASE_ADMIN_CLIENT_EMAIL, and NEXT_PUBLIC_FIREBASE_PROJECT_ID are set correctly.\n' +
+        'See FIREBASE_SETUP.md for detailed instructions.\n'
+      );
+    }
+    
+    // Return empty result if database is not configured
+    result = { clients: [], total: 0, page, limit, totalPages: 0 };
+  }
 
   return <ClientsPageClient initialData={result} />;
 }

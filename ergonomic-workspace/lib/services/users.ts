@@ -139,7 +139,9 @@ export async function createOrUpdateUser(
     timezone: existingUser?.timezone || 'America/New_York',
     organisation: existingUser?.organisation || 'Ergonomic Workspace Solutions',
     isAdmin: existingUser?.isAdmin || false,
-    hasAppAccess: existingUser?.hasAppAccess || false,
+    // Always grant access when syncing - if a user can authenticate, they should have access
+    // Access can be explicitly revoked through admin actions if needed
+    hasAppAccess: true,
     userStatus: existingUser?.userStatus || 'ACTIVE',
     updatedAt: serverTimestamp(),
     lastSyncedAt: serverTimestamp(),

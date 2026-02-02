@@ -215,15 +215,16 @@ export async function createQuestionnaire(
   createdBy: string
 ): Promise<QuestionnaireWithQuestions> {
   // Store questions as JSON array
+  // Convert undefined values to null for Firestore compatibility
   const questionsJson = data.questions.map((q, index) => ({
     id: q.id || `q-${Date.now()}-${index}`,
     order: q.order ?? index + 1,
     type: q.type,
     text: q.text,
-    helpText: q.helpText,
+    helpText: q.helpText ?? null,
     required: q.required ?? true,
-    options: q.options,
-    section: q.section,
+    options: q.options ?? null,
+    section: q.section ?? null,
   }));
 
   const id = generateId();
@@ -287,15 +288,16 @@ export async function updateQuestionnaire(
 
   // Handle questions update if provided
   if (data.questions) {
+    // Convert undefined values to null for Firestore compatibility
     const questionsJson = data.questions.map((q, index) => ({
       id: q.id || `q-${Date.now()}-${index}`,
       order: q.order ?? index + 1,
       type: q.type,
       text: q.text,
-      helpText: q.helpText,
+      helpText: q.helpText ?? null,
       required: q.required ?? true,
-      options: q.options,
-      section: q.section,
+      options: q.options ?? null,
+      section: q.section ?? null,
     }));
     updateData.questions = questionsJson;
   }

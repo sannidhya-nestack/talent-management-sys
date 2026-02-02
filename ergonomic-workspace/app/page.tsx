@@ -14,7 +14,25 @@ import { AlertCircle } from 'lucide-react';
 import { LoginPageClient } from './page-client';
 
 export default async function Home() {
-  const session = await auth();
+  let session;
+  try {
+    session = await auth();
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error checking authentication:', errorMessage);
+    
+    // If Firebase Admin isn't configured, show login page anyway
+    // User can still try to sign in with Firebase client SDK
+    if (errorMessage.includes('FIREBASE_ADMIN') || 
+        errorMessage.includes('Missing required Firebase') ||
+        errorMessage.includes('DECODER')) {
+      console.warn('Firebase Admin not configured - allowing client-side auth only');
+      session = null;
+    } else {
+      // For other errors, rethrow
+      throw error;
+    }
+  }
 
   // If user is already logged in, redirect to dashboard
   if (session?.user) {

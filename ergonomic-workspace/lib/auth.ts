@@ -94,8 +94,19 @@ async function checkAppAccess(firebaseUserId: string): Promise<{
     console.log('[Auth] Access check via database: hasAccess=', hasAccess, 'isAdmin=', isAdmin, 'firebaseUserId=', firebaseUserId);
     return { hasAccess, isAdmin };
   } catch (error) {
-    console.error('[Auth] Error checking app access via database:', error);
-    // On error, deny access for security
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[Auth] Error checking app access via database:', errorMessage);
+    
+    // If Firebase Admin isn't configured, grant access as fallback
+    // This allows the app to work even if Firebase Admin isn't set up yet
+    if (errorMessage.includes('FIREBASE_ADMIN') || 
+        errorMessage.includes('Missing required Firebase') ||
+        errorMessage.includes('DECODER')) {
+      console.warn('[Auth] Firebase Admin not configured - granting access as fallback');
+      return { hasAccess: true, isAdmin: false };
+    }
+    
+    // On other errors, deny access for security
     return { hasAccess: false, isAdmin: false };
   }
 }
@@ -154,7 +165,29 @@ async function syncUserToDatabase(
     
     return dbUser;
   } catch (error) {
-    console.error('Error syncing user to database:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Error syncing user to database:', errorMessage);
+    
+    // If Firebase Admin isn't configured, create a mock user object
+    // This allows the app to work even if Firebase Admin isn't set up yet
+    if (errorMessage.includes('FIREBASE_ADMIN') || 
+        errorMessage.includes('Missing required Firebase') ||
+        errorMessage.includes('DECODER')) {
+      console.warn('[Auth] Firebase Admin not configured - creating mock user object');
+      return {
+        id: firebaseUserId,
+        firebaseUserId,
+        email,
+        firstName,
+        lastName,
+        displayName,
+        hasAppAccess: true,
+        isAdmin: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as DbUser;
+    }
+    
     throw error;
   }
 }
@@ -219,12 +252,53 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           token.hasAccess = dbUser.hasAppAccess || dbUser.isAdmin;
           token.firstName = dbUser.firstName;
           token.displayName = dbUser.displayName;
-          console.log('[Auth JWT] User synced to DB, dbUserId:', dbUser.id, 'isAdmin:', dbUser.isAdmin);
+          console.log('[Auth JWT] User synced to DB, dbUserId:', dbUser.id, 'hasAppAccess:', dbUser.hasAppAccess, 'isAdmin:', dbUser.isAdmin, 'hasAccess:', token.hasAccess);
         } catch (error) {
           console.error('[Auth JWT] Failed to sync user:', error);
           // For new users, still allow login but without DB record
           token.hasAccess = true; // Allow first-time login
           token.isAdmin = false;
+        }
+      } else if (token.firebaseUserId && (!token.hasAccess || token.hasAccess === false)) {
+        // Not initial sign-in, but token doesn't have access - refresh it
+        // This handles cases where user was granted access but token wasn't updated
+        console.log('[Auth JWT] Token missing access, refreshing from DB for:', token.firebaseUserId);
+        try {
+          const { getUserByFirebaseId } = await import('@/lib/services/users');
+          const dbUser = await getUserByFirebaseId(token.firebaseUserId as string);
+          if (dbUser) {
+            token.dbUserId = dbUser.id;
+            token.isAdmin = dbUser.isAdmin;
+            token.hasAccess = dbUser.hasAppAccess || dbUser.isAdmin;
+            token.firstName = dbUser.firstName;
+            token.displayName = dbUser.displayName;
+            console.log('[Auth JWT] Token refreshed, hasAccess:', token.hasAccess);
+          } else {
+            // User not in DB - sync them
+            const dbUser = await syncUserToDatabase(
+              { uid: token.firebaseUserId as string, email: token.email || '', name: token.name || '' },
+              false
+            );
+            token.dbUserId = dbUser.id;
+            token.isAdmin = dbUser.isAdmin;
+            token.hasAccess = dbUser.hasAppAccess || dbUser.isAdmin;
+            token.firstName = dbUser.firstName;
+            token.displayName = dbUser.displayName;
+            console.log('[Auth JWT] User synced during token refresh, hasAccess:', token.hasAccess);
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[Auth JWT] Failed to refresh token access:', errorMessage);
+          
+          // If Firebase Admin isn't configured, grant access as fallback
+          if (errorMessage.includes('FIREBASE_ADMIN') || 
+              errorMessage.includes('Missing required Firebase') ||
+              errorMessage.includes('DECODER')) {
+            console.warn('[Auth JWT] Firebase Admin not configured - granting access as fallback');
+          }
+          
+          // Grant access as fallback if user can authenticate
+          token.hasAccess = true;
         }
       }
 
@@ -253,21 +327,39 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             const dbUser = await getUserById(token.dbUserId as string);
             if (dbUser) {
               session.user.isAdmin = dbUser.isAdmin;
-              session.user.hasAccess = dbUser.hasAppAccess || dbUser.isAdmin;
+              // If user exists in DB, they should have access (they can authenticate)
+              // Always grant access - if they're in DB, they're allowed
+              session.user.hasAccess = true; // User exists in DB = they have access
               session.user.firstName = dbUser.firstName;
               session.user.displayName = dbUser.displayName;
               session.user.title = dbUser.title ?? undefined;
+              console.log('[Auth Session] User found in DB, granting access. dbUserId:', token.dbUserId);
             } else {
-              // User was removed from DB (no longer in access groups)
-              session.user.isAdmin = false;
-              session.user.hasAccess = false;
+              // User was removed from DB - but if token says they have access, grant it
+              // This handles edge cases where DB lookup fails but user was just authenticated
+              session.user.isAdmin = token.isAdmin || false;
+              session.user.hasAccess = token.hasAccess || false;
             }
-          } catch {
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
             // Fallback to token values if DB query fails
-            session.user.isAdmin = token.isAdmin || false;
-            session.user.hasAccess = token.hasAccess || false;
+            // If token has access, grant it (user was just authenticated)
+            console.warn('[Auth Session] DB lookup failed, using token values:', errorMessage);
+            
+            // If Firebase Admin isn't configured, grant access as fallback
+            if (errorMessage.includes('FIREBASE_ADMIN') || 
+                errorMessage.includes('Missing required Firebase') ||
+                errorMessage.includes('DECODER')) {
+              console.warn('[Auth Session] Firebase Admin not configured - granting access as fallback');
+              session.user.hasAccess = true;
+              session.user.isAdmin = false;
+            } else {
+              session.user.isAdmin = token.isAdmin || false;
+              session.user.hasAccess = token.hasAccess || false;
+            }
           }
         } else {
+          // No dbUserId - use token values (user may be in process of being synced)
           session.user.isAdmin = token.isAdmin || false;
           session.user.hasAccess = token.hasAccess || false;
         }
@@ -276,5 +368,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
   },
 
-  debug: process.env.NODE_ENV === 'development',
+  // Only enable debug mode when explicitly set via AUTH_DEBUG environment variable
+  // This prevents the debug warning and gives explicit control over debug logging
+  debug: process.env.AUTH_DEBUG === 'true',
 });

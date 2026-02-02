@@ -297,42 +297,6 @@ export async function updateInstallation(
   if (data.photos !== undefined) updateData.photos = data.photos;
 
   await collections.installations().doc(id).update(updateData);
-}
-
-/**
- * Add a delivery status update
- */
-export async function addDeliveryUpdate(
-  installationId: string,
-  update: DeliveryUpdate,
-  userId: string
-) {
-  const doc = await collections.installations().doc(installationId).get();
-
-  if (!doc.exists) {
-    throw new Error('Installation not found');
-  }
-
-  const data = doc.data()!;
-  const existingUpdates = ((data.deliveryUpdates as DeliveryUpdate[] | null) || []).map((u) => ({
-    ...u,
-    date: timestampToDate(u.date) || new Date(),
-  }));
-
-  const newUpdate: DeliveryUpdate = {
-    ...update,
-    confirmedBy: userId,
-  };
-
-  await collections.installations().doc(installationId).update({
-    deliveryStatus: update.status,
-    deliveryUpdates: [...existingUpdates, newUpdate],
-    deliveryDate: update.status === DeliveryStatus.DELIVERED_TO_SITE ? update.date : data.deliveryDate,
-    updatedAt: serverTimestamp(),
-  });
-
-  return newUpdate;
-}
 
   // Get updated installation with related data
   const installation = await getInstallationById(id);
@@ -361,6 +325,43 @@ export async function addDeliveryUpdate(
         }
       : null,
   };
+}
+
+/**
+ * Add a delivery status update
+ */
+export async function addDeliveryUpdate(
+  installationId: string,
+  update: DeliveryUpdate,
+  userId: string
+) {
+  const doc = await collections.installations().doc(installationId).get();
+
+  if (!doc.exists) {
+    throw new Error('Installation not found');
+  }
+
+  const data = doc.data()!;
+  const existingUpdates = ((data.deliveryUpdates as DeliveryUpdate[] | null) || []).map((u) => {
+    return {
+      ...u,
+      date: timestampToDate(u.date) || new Date(),
+    };
+  });
+
+  const newUpdate: DeliveryUpdate = {
+    ...update,
+    confirmedBy: userId,
+  };
+
+  await collections.installations().doc(installationId).update({
+    deliveryStatus: update.status,
+    deliveryUpdates: [...existingUpdates, newUpdate],
+    deliveryDate: update.status === DeliveryStatus.DELIVERED_TO_SITE ? update.date : data.deliveryDate,
+    updatedAt: serverTimestamp(),
+  });
+
+  return newUpdate;
 }
 
 /**

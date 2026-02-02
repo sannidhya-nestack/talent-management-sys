@@ -9,12 +9,13 @@ import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
-export default function AuthErrorPage({
+export default async function AuthErrorPage({
   searchParams,
 }: {
-  searchParams: { error?: string };
+  searchParams: Promise<{ error?: string }>;
 }) {
-  const error = searchParams.error;
+  const params = await searchParams;
+  const error = params.error;
 
   let errorMessage = 'An authentication error occurred.';
   let errorTitle = 'Authentication Error';
